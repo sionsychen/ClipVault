@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ClipVault 库</title>
+  <link rel="stylesheet" href="library.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">ClipVault</div>
+    <input id="search" class="search" type="search" placeholder="搜索标题 / 正文 / 标签 / 备注…">
+    <span id="usage" class="usage"></span>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <section>
+        <h3>项目</h3>
+        <ul id="projects" class="pill-list"></ul>
+      </section>
+      <section>
+        <h3>标签</h3>
+        <ul id="tags" class="pill-list"></ul>
+      </section>
+    </aside>
+
+    <main class="content">
+      <div id="empty" class="empty" hidden>还没有剪藏。右键页面上的图片或文本开始收集。</div>
+      <div id="grid" class="grid"></div>
+    </main>
+  </div>
+
+  <script src="library.js"></script>
+</body>
+</html>
