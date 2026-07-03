@@ -115,7 +115,7 @@ function showBubble(resp) {
 
   wrap.querySelector('.cv-x').onclick = removeBubble;
   wrap.querySelector('.cv-open').onclick = () => {
-    chrome.runtime.sendMessage({ type: 'clipvault:openLibrary' });
+    chrome.runtime.sendMessage({ type: 'clipvault:openLibrary' }, () => void chrome.runtime.lastError);
     removeBubble();
   };
   wrap.querySelector('.cv-save').onclick = () => {
@@ -127,8 +127,14 @@ function showBubble(resp) {
     });
   };
 
+  // 只在"完全没碰过冒泡"时才自动关闭;一旦聚焦输入框或鼠标移入,
+  // 取消倒计时,避免正在输标签时被关掉。
+  const cancelAutoClose = () => clearTimeout(showBubble._t);
+  wrap.addEventListener('mouseenter', cancelAutoClose);
+  wrap.addEventListener('focusin', cancelAutoClose);
+
   clearTimeout(showBubble._t);
-  showBubble._t = setTimeout(removeBubble, 8000);
+  showBubble._t = setTimeout(removeBubble, 12000);
 }
 
 function removeBubble() {
