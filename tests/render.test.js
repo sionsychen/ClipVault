@@ -21,4 +21,16 @@ describe('buildCardModel', () => {
     const m = buildCardModel({ id: 3, type: 'video', content: 'http://v' });
     expect(m.tags).toEqual([]);
   });
+  it('video clip is flagged isVideo and uses thumbnail as image', () => {
+    const m = buildCardModel({ id: 4, type: 'video', thumbnail: 'https://img.youtube.com/vi/x/hqdefault.jpg', content: 'https://youtu.be/x' });
+    expect(m.isVideo).toBe(true);
+    expect(m.image).toBe('https://img.youtube.com/vi/x/hqdefault.jpg');
+    expect(m.previewText).toBe('');
+  });
+  it('tweet clip shows url as preview and no image', () => {
+    const m = buildCardModel({ id: 5, type: 'tweet', content: 'https://x.com/u/status/1' });
+    expect(m.isVideo).toBe(false);
+    expect(m.image).toBeNull();
+    expect(m.previewText).toBe('https://x.com/u/status/1');
+  });
 });

@@ -1,5 +1,6 @@
 import { MSG, CLIP_TYPES, THUMB_MAX_DIM } from '../core/constants.js';
 import { computeThumbDimensions } from '../core/thumbnail.js';
+import { detectMediaType } from '../core/media-type.js';
 
 // 防重复注入:按需注入(executeScript)可能把本文件重复执行一遍,
 // 若无此 guard 就会注册第二个 onMessage listener,导致一次剪藏存两次。
@@ -39,14 +40,24 @@ async function buildClip(msg) {
     }
     case 'clipvault-selection':
       return { ...base, type: CLIP_TYPES.TEXT, content: (msg.selectionText || '').trim() };
-    case 'clipvault-link':
+    case 'clipvault-link': {
+      const media = detectMediaType(msg.linkUrl);
+      if (media) {
+        return { ...base, type: media.type, content: msg.linkUrl, thumbnail: media.thumbnail, note: msg.selectionText || '' };
+      }
       return { ...base, type: CLIP_TYPES.TEXT, content: msg.linkUrl, note: msg.selectionText || '' };
-    case 'clipvault-page':
+    }
+    case 'clipvault-page': {
+      const media = detectMediaType(msg.pageUrl);
+      if (media) {
+        return { ...base, type: media.type, content: msg.pageUrl, thumbnail: media.thumbnail };
+      }
       return {
         ...base,
         type: CLIP_TYPES.ARTICLE,
         content: (getMeta('description') || document.body?.innerText || '').slice(0, 2000),
       };
+    }
     default:
       return null;
   }
@@ -92,13 +103,26 @@ let bubbleEl = null;
 
 function showBubble(resp) {
   removeBubble();
+  const projects = resp.projects || [];
+  const current = resp.project || '';
+  const options = [...new Set([...projects, current])].filter(Boolean).sort();
+  const optionHtml = options
+    .map((p) => `<option value="${escapeHtml(p)}"${p === current ? ' selected' : ''}>${escapeHtml(p)}</option>`)
+    .join('');
+
   const wrap = document.createElement('div');
   wrap.id = 'clipvault-bubble';
   wrap.innerHTML = `
     <div class="cv-head">
-      <span>&#10003; Saved to <b>${escapeHtml(resp.project || '')}</b></span>
+      <span>&#10003; Clipped</span>
       <button class="cv-x" title="Close">&times;</button>
     </div>
+    <label class="cv-row"><span>Project</span>
+      <select class="cv-project">${optionHtml}<option value="__new__">+ New project…</option></select>
+    </label>
+    <label class="cv-row cv-newproj" hidden><span>New project name</span>
+      <input class="cv-newproj-input" type="text" placeholder="e.g. Moodboard">
+    </label>
     <label class="cv-row"><span>Tags</span>
       <input class="cv-tags" type="text" value="${escapeHtml((resp.tags || []).join(', '))}" placeholder="comma separated">
     </label>
@@ -113,6 +137,15 @@ function showBubble(resp) {
   document.body.appendChild(wrap);
   bubbleEl = wrap;
 
+  const projectSel = wrap.querySelector('.cv-project');
+  const newProjRow = wrap.querySelector('.cv-newproj');
+  const newProjInput = wrap.querySelector('.cv-newproj-input');
+  projectSel.onchange = () => {
+    const isNew = projectSel.value === '__new__';
+    newProjRow.hidden = !isNew;
+    if (isNew) newProjInput.focus();
+  };
+
   wrap.querySelector('.cv-x').onclick = removeBubble;
   wrap.querySelector('.cv-open').onclick = () => {
     chrome.runtime.sendMessage({ type: 'clipvault:openLibrary' }, () => void chrome.runtime.lastError);
@@ -121,7 +154,13 @@ function showBubble(resp) {
   wrap.querySelector('.cv-save').onclick = () => {
     const tags = wrap.querySelector('.cv-tags').value.split(',').map((s) => s.trim()).filter(Boolean);
     const note = wrap.querySelector('.cv-note').value.trim();
-    chrome.runtime.sendMessage({ type: MSG.SAVE_EDITS, id: resp.id, patch: { tags, note } }, () => {
+    const project = projectSel.value === '__new__'
+      ? newProjInput.value.trim()
+      : projectSel.value;
+    const patch = { tags, note };
+    if (project && project !== current) patch.project = project;
+    chrome.runtime.sendMessage({ type: MSG.SAVE_EDITS, id: resp.id, patch }, () => {
+      void chrome.runtime.lastError;
       toast('Saved');
       removeBubble();
     });
@@ -157,6 +196,7 @@ function applyBubbleStyles(wrap) {
     #clipvault-bubble .cv-row{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
     #clipvault-bubble .cv-row span{font-size:11px;color:#666}
     #clipvault-bubble .cv-row input{padding:5px 7px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box}
+    #clipvault-bubble .cv-row select{padding:5px 7px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box;background:#fff;color:#1a1a1a}
     #clipvault-bubble .cv-actions{display:flex;gap:8px;justify-content:flex-end}
     #clipvault-bubble .cv-actions button{padding:5px 12px;border-radius:6px;border:1px solid #ccc;background:#f5f5f5;cursor:pointer;font-size:12px}
     #clipvault-bubble .cv-save{background:#2d6cdf;color:#fff;border-color:#2d6cdf}`;

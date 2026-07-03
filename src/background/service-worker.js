@@ -1,5 +1,5 @@
 import { MSG, CLIP_TYPES, DEFAULT_PROJECT, LAST_PROJECT_KEY } from '../core/constants.js';
-import { addClip, updateClip, addProject } from '../db/clip-store.js';
+import { addClip, updateClip, getProjects } from '../db/clip-store.js';
 import { inferTags } from '../core/tag-inference.js';
 
 const MENU = {
@@ -84,9 +84,9 @@ async function handleCapture(clip) {
       note: clip.note || '',
     };
     const result = await addClip(record);
-    if (project) await addProject(project);
     await setLastProject(project);
-    return { ok: true, ...result, project, tags };
+    const projects = await getProjects();
+    return { ok: true, ...result, project, tags, projects };
   } catch (e) {
     return { ok: false, error: String(e) };
   }

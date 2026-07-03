@@ -1,7 +1,9 @@
-import { getAllClips, getProjects, getTags, updateClip, deleteClip } from '../db/clip-store.js';
+import {
+  getAllClips, getProjects, getTags, updateClip, deleteClip,
+  estimateUsage, exportData, importData,
+} from '../db/clip-store.js';
 import { filterClips } from '../core/search.js';
 import { buildCardModel } from './render.js';
-import { estimateUsage } from '../db/clip-store.js';
 import { CLIP_TYPES } from '../core/constants.js';
 
 const state = {
@@ -9,6 +11,9 @@ const state = {
   project: null,
   activeTags: new Set(),
   query: '',
+  sort: 'newest',
+  selected: new Set(),
+  allProjects: [], // 侧栏 + 编辑模态共用的项目全集
 };
 
 const els = {
@@ -18,6 +23,18 @@ const els = {
   tags: document.getElementById('tags'),
   search: document.getElementById('search'),
   usage: document.getElementById('usage'),
+  sort: document.getElementById('sort'),
+  export: document.getElementById('export'),
+  exportMd: document.getElementById('export-md'),
+  import: document.getElementById('import'),
+  importFile: document.getElementById('import-file'),
+  selbar: document.getElementById('selbar'),
+  selcount: document.getElementById('selcount'),
+  selClear: document.getElementById('sel-clear'),
+  selDelete: document.getElementById('sel-delete'),
+  modal: document.getElementById('modal'),
+  modalBody: document.querySelector('#modal .modal-body'),
+  modalBackdrop: document.querySelector('#modal .modal-backdrop'),
 };
 
 const TYPE_LABEL = {
@@ -35,13 +52,35 @@ async function init() {
     state.query = e.target.value;
     renderGrid();
   }, 150));
+  els.sort.addEventListener('change', () => {
+    state.sort = els.sort.value;
+    sortClips();
+    renderGrid();
+  });
+  els.selClear.addEventListener('click', clearSelection);
+  els.selDelete.addEventListener('click', deleteSelected);
+  els.export.addEventListener('click', doExportJson);
+  els.exportMd.addEventListener('click', doExportMarkdown);
+  els.import.addEventListener('click', () => els.importFile.click());
+  els.importFile.addEventListener('change', doImport);
+  els.modalBackdrop.addEventListener('click', closeModal);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
   await reload();
   renderUsage();
 }
 
+function sortClips() {
+  const dir = state.sort === 'oldest' ? 1 : -1;
+  state.clips.sort((a, b) => (a.createdAt - b.createdAt) * dir);
+}
+
 async function reload() {
   const [clips, projects, tags] = await Promise.all([getAllClips(), getProjects(), getTags()]);
-  state.clips = clips.sort((a, b) => b.createdAt - a.createdAt);
+  state.clips = clips;
+  sortClips();
+  // 去掉已不存在的选中项
+  const ids = new Set(clips.map((c) => c.id));
+  state.selected.forEach((id) => { if (!ids.has(id)) state.selected.delete(id); });
   renderSidebar(projects, tags);
   renderGrid();
 }
@@ -51,6 +90,7 @@ function renderSidebar(projects, tags) {
   const projSet = new Set(projects);
   state.clips.forEach((c) => c.project && projSet.add(c.project));
   const projList = [...projSet].sort();
+  state.allProjects = projList;
 
   els.projects.innerHTML = '';
   els.projects.appendChild(makePill('All', state.project === null, () => {
@@ -106,12 +146,27 @@ function renderGrid() {
   for (const clip of filtered) {
     els.grid.appendChild(renderCard(clip));
   }
+  renderSelbar();
 }
 
 function renderCard(clip) {
   const m = buildCardModel(clip);
   const card = document.createElement('div');
-  card.className = 'card';
+  card.className = 'card' + (state.selected.has(clip.id) ? ' selected' : '');
+
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.className = 'select-box';
+  check.checked = state.selected.has(clip.id);
+  check.title = 'Select';
+  check.onclick = (e) => e.stopPropagation();
+  check.onchange = () => {
+    if (check.checked) state.selected.add(clip.id);
+    else state.selected.delete(clip.id);
+    card.classList.toggle('selected', check.checked);
+    renderSelbar();
+  };
+  card.appendChild(check);
 
   const badge = document.createElement('span');
   badge.className = 'type-badge';
@@ -119,13 +174,22 @@ function renderCard(clip) {
   card.appendChild(badge);
 
   if (m.image) {
+    const frame = document.createElement('div');
+    frame.className = 'thumb';
     const img = document.createElement('img');
     img.src = m.image;
     img.loading = 'lazy';
     img.alt = m.title;
-    img.onclick = () => m.sourceUrl && window.open(m.sourceUrl, '_blank');
-    img.style.cursor = m.sourceUrl ? 'pointer' : 'default';
-    card.appendChild(img);
+    frame.appendChild(img);
+    if (m.isVideo) {
+      const play = document.createElement('span');
+      play.className = 'play-badge';
+      play.textContent = '▶';
+      frame.appendChild(play);
+    }
+    frame.onclick = () => openLightbox(clip, m);
+    frame.style.cursor = 'pointer';
+    card.appendChild(frame);
   } else if (m.previewText) {
     const p = document.createElement('div');
     p.className = 'text-preview';
@@ -169,15 +233,8 @@ function buildActions(clip) {
 
   const edit = document.createElement('button');
   edit.textContent = '✎';
-  edit.title = 'Edit tags';
-  edit.onclick = async (e) => {
-    e.stopPropagation();
-    const tagStr = prompt('Tags (comma separated):', (clip.tags || []).join(', '));
-    if (tagStr === null) return;
-    const tags = tagStr.split(',').map((s) => s.trim()).filter(Boolean);
-    await updateClip(clip.id, { tags });
-    await reload();
-  };
+  edit.title = 'Edit';
+  edit.onclick = (e) => { e.stopPropagation(); openEditModal(clip); };
 
   const del = document.createElement('button');
   del.textContent = '🗑';
@@ -186,6 +243,7 @@ function buildActions(clip) {
     e.stopPropagation();
     if (!confirm('Delete this clip?')) return;
     await deleteClip(clip.id);
+    state.selected.delete(clip.id);
     await reload();
   };
 
@@ -193,9 +251,224 @@ function buildActions(clip) {
   return wrap;
 }
 
+// ---- 批量选择 ----
+
+function renderSelbar() {
+  const n = state.selected.size;
+  els.selbar.hidden = n === 0;
+  els.selcount.textContent = `${n} selected`;
+}
+
+function clearSelection() {
+  state.selected.clear();
+  renderGrid();
+}
+
+async function deleteSelected() {
+  const n = state.selected.size;
+  if (!n) return;
+  if (!confirm(`Delete ${n} selected clip${n > 1 ? 's' : ''}?`)) return;
+  for (const id of state.selected) await deleteClip(id);
+  state.selected.clear();
+  await reload();
+  renderUsage();
+}
+
+// ---- 灯箱 ----
+
+function openLightbox(clip, m) {
+  els.modalBody.innerHTML = '';
+  const img = document.createElement('img');
+  img.className = 'lightbox-img';
+  // 图片剪藏用原图,视频用封面
+  img.src = clip.type === CLIP_TYPES.IMAGE ? (clip.content || m.image) : m.image;
+  els.modalBody.appendChild(img);
+
+  const cap = document.createElement('div');
+  cap.className = 'modal-caption';
+  if (m.title) {
+    const t = document.createElement('div');
+    t.textContent = m.title;
+    cap.appendChild(t);
+  }
+  if (m.sourceUrl) {
+    const a = document.createElement('a');
+    a.href = m.sourceUrl;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = m.isVideo ? 'Watch source ↗' : 'Open source ↗';
+    cap.appendChild(a);
+  }
+  els.modalBody.appendChild(cap);
+  els.modal.hidden = false;
+}
+
+// ---- 编辑模态(tags + note + 项目移动) ----
+
+function openEditModal(clip) {
+  els.modalBody.innerHTML = '';
+  const panel = document.createElement('div');
+  panel.className = 'edit-panel';
+
+  const h = document.createElement('h3');
+  h.textContent = 'Edit clip';
+  panel.appendChild(h);
+
+  const projSel = buildProjectSelect(clip.project || '');
+  const projLabel = labeled('Project', projSel.wrap);
+  panel.appendChild(projLabel);
+
+  const tagsInput = document.createElement('input');
+  tagsInput.type = 'text';
+  tagsInput.value = (clip.tags || []).join(', ');
+  tagsInput.placeholder = 'comma separated';
+  panel.appendChild(labeled('Tags', tagsInput));
+
+  const noteInput = document.createElement('input');
+  noteInput.type = 'text';
+  noteInput.value = clip.note || '';
+  noteInput.placeholder = 'optional';
+  panel.appendChild(labeled('Note', noteInput));
+
+  const actions = document.createElement('div');
+  actions.className = 'edit-actions';
+  const cancel = document.createElement('button');
+  cancel.className = 'tool-btn';
+  cancel.textContent = 'Cancel';
+  cancel.onclick = closeModal;
+  const save = document.createElement('button');
+  save.className = 'tool-btn primary';
+  save.textContent = 'Save';
+  save.onclick = async () => {
+    const tags = tagsInput.value.split(',').map((s) => s.trim()).filter(Boolean);
+    const note = noteInput.value.trim();
+    const project = projSel.value() || clip.project;
+    await updateClip(clip.id, { tags, note, project });
+    closeModal();
+    await reload();
+  };
+  actions.append(cancel, save);
+  panel.appendChild(actions);
+
+  els.modalBody.appendChild(panel);
+  els.modal.hidden = false;
+}
+
+// 项目下拉:已有项目 + 当前项目 + "New project…"(选中后显露文本框)
+function buildProjectSelect(current) {
+  const wrap = document.createElement('div');
+  const sel = document.createElement('select');
+  const names = [...new Set([...state.allProjects, current])].filter(Boolean).sort();
+  for (const name of names) {
+    const o = document.createElement('option');
+    o.value = name;
+    o.textContent = name;
+    if (name === current) o.selected = true;
+    sel.appendChild(o);
+  }
+  const newOpt = document.createElement('option');
+  newOpt.value = '__new__';
+  newOpt.textContent = '+ New project…';
+  sel.appendChild(newOpt);
+
+  const newInput = document.createElement('input');
+  newInput.type = 'text';
+  newInput.placeholder = 'New project name';
+  newInput.hidden = true;
+  newInput.style.marginTop = '6px';
+
+  sel.onchange = () => {
+    const isNew = sel.value === '__new__';
+    newInput.hidden = !isNew;
+    if (isNew) newInput.focus();
+  };
+
+  wrap.append(sel, newInput);
+  return {
+    wrap,
+    value: () => (sel.value === '__new__' ? newInput.value.trim() : sel.value),
+  };
+}
+
+function labeled(labelText, control) {
+  const label = document.createElement('label');
+  const span = document.createElement('span');
+  span.textContent = labelText;
+  label.append(span, control);
+  return label;
+}
+
+function closeModal() {
+  els.modal.hidden = true;
+  els.modalBody.innerHTML = '';
+}
+
+// ---- 导出 / 导入 ----
+
+async function doExportJson() {
+  const data = await exportData();
+  downloadBlob(
+    JSON.stringify(data, null, 2),
+    `clipvault-backup-${dateStamp()}.json`,
+    'application/json'
+  );
+}
+
+async function doExportMarkdown() {
+  const md = clipsToMarkdown(state.clips);
+  downloadBlob(md, `clipvault-${dateStamp()}.md`, 'text/markdown');
+}
+
+async function doImport(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const payload = JSON.parse(await file.text());
+    const r = await importData(payload);
+    await reload();
+    renderUsage();
+    alert(`Imported ${r.added} new clip${r.added === 1 ? '' : 's'}, skipped ${r.skipped} duplicate${r.skipped === 1 ? '' : 's'}.`);
+  } catch (err) {
+    alert('Import failed: ' + err.message);
+  } finally {
+    e.target.value = ''; // 允许再次选同一文件
+  }
+}
+
+// 纯格式化,不触库。
+function clipsToMarkdown(clips) {
+  const lines = ['# ClipVault export', ''];
+  for (const c of clips) {
+    const title = c.pageTitle || c.content || '(untitled)';
+    lines.push(`- **${title}**`);
+    if (c.sourceUrl) lines.push(`  - Source: ${c.sourceUrl}`);
+    if (c.project) lines.push(`  - Project: ${c.project}`);
+    if (c.tags?.length) lines.push(`  - Tags: ${c.tags.join(', ')}`);
+    if (c.note) lines.push(`  - Note: ${c.note}`);
+  }
+  return lines.join('\n');
+}
+
+function downloadBlob(text, filename, mime) {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function dateStamp() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 async function renderUsage() {
-  const { usage, quota } = await estimateUsage();
-  if (!usage) return;
+  const { usage } = await estimateUsage();
+  if (!usage) {
+    els.usage.textContent = `${state.clips.length} clips`;
+    return;
+  }
   const mb = (usage / 1024 / 1024).toFixed(1);
   els.usage.textContent = `${mb} MB used · ${state.clips.length} clips`;
 }

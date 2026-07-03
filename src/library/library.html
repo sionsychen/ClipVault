@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,6 +10,14 @@
   <header class="topbar">
     <div class="brand">ClipVault</div>
     <input id="search" class="search" type="search" placeholder="Search title / text / tags / notes…">
+    <select id="sort" class="sort" title="Sort order">
+      <option value="newest">Newest</option>
+      <option value="oldest">Oldest</option>
+    </select>
+    <button id="export" class="tool-btn" title="Export backup (JSON)">Export</button>
+    <button id="export-md" class="tool-btn" title="Export as Markdown">Markdown</button>
+    <button id="import" class="tool-btn" title="Import backup (JSON)">Import</button>
+    <input id="import-file" type="file" accept="application/json,.json" hidden>
     <span id="usage" class="usage"></span>
   </header>
 
@@ -26,9 +34,21 @@
     </aside>
 
     <main class="content">
+      <div id="selbar" class="selbar" hidden>
+        <span id="selcount"></span>
+        <div class="selbar-actions">
+          <button id="sel-clear" class="tool-btn">Clear</button>
+          <button id="sel-delete" class="tool-btn danger">Delete selected</button>
+        </div>
+      </div>
       <div id="empty" class="empty" hidden>Nothing clipped yet. Right-click an image or text on any page to start collecting.</div>
       <div id="grid" class="grid"></div>
     </main>
+  </div>
+
+  <div id="modal" class="modal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-body"></div>
   </div>
 
   <script src="library.js"></script>

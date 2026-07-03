@@ -80,9 +80,11 @@ export async function addClip(clip) {
     const t = db.transaction([STORE_CLIPS], 'readwrite');
     const id = await reqToPromise(t.objectStore(STORE_CLIPS).add(newRecord));
     await txDone(t);
-    return { result: { status: 'added', id }, tags: newRecord.tags };
+    return { result: { status: 'added', id }, tags: newRecord.tags, project: newRecord.project };
   });
   await bumpTags(record.tags);
+  // 登记项目,让"含 clip 的项目"始终出现在项目列表里,与调用方无关。
+  if (record.project) await addProject(record.project);
   return record.result;
 }
 
@@ -108,6 +110,8 @@ export async function updateClip(id, patch) {
     return next;
   });
   if (patch.tags) await bumpTags(patch.tags);
+  // 改项目时登记(含库内移动/气泡新建的项目),让侧栏能列出它。
+  if (updated && patch.project) await addProject(patch.project);
   return updated;
 }
 
@@ -168,3 +172,48 @@ export async function estimateUsage() {
   }
   return { usage: 0, quota: 0 };
 }
+
+export const EXPORT_VERSION = 1;
+
+// 整库快照。tags 计数不导出——导入时由 addClip→bumpTags 自然重建,
+// 避免快照 count 与实际 clip 数对不上。
+export async function exportData() {
+  const [clips, projects] = await Promise.all([getAllClips(), getProjects()]);
+  return {
+    app: 'clipvault',
+    version: EXPORT_VERSION,
+    exportedAt: Date.now(),
+    clips,
+    projects,
+  };
+}
+
+// 逐条 addClip 走 clipKey 去重,天然做增量 merge;createdAt 透传保序。
+// 返回 { added, skipped } 供 UI 反馈。
+export async function importData(payload) {
+  if (!payload || !Array.isArray(payload.clips)) {
+    throw new Error('Invalid backup file');
+  }
+  let added = 0;
+  let skipped = 0;
+  for (const c of payload.clips) {
+    const r = await addClip({
+      type: c.type,
+      sourceUrl: c.sourceUrl,
+      pageTitle: c.pageTitle,
+      thumbnail: c.thumbnail,
+      content: c.content,
+      project: c.project,
+      tags: c.tags,
+      note: c.note,
+      createdAt: c.createdAt,
+    });
+    if (r.status === 'added') added++;
+    else skipped++;
+  }
+  for (const name of payload.projects || []) {
+    if (name) await addProject(name);
+  }
+  return { added, skipped };
+}
+

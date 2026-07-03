@@ -61,6 +61,14 @@ describe('clip-store projects', () => {
     await addProject('Kitty');
     expect(await getProjects()).toEqual(expect.arrayContaining(['X6', 'Kitty']));
   });
+
+  it('updateClip with a new project registers it', async () => {
+    const { id } = await addClip(sampleClip());
+    await updateClip(id, { project: 'Moodboard' });
+    expect(await getProjects()).toContain('Moodboard');
+    const all = await getAllClips();
+    expect(all[0].project).toBe('Moodboard');
+  });
 });
 
 describe('clip-store tags', () => {
