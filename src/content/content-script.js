@@ -1,23 +1,29 @@
 import { MSG, CLIP_TYPES, THUMB_MAX_DIM } from '../core/constants.js';
 import { computeThumbDimensions } from '../core/thumbnail.js';
 
-// content script 里没法 import DOM 之外的运行时依赖以外的东西即可,这里全部就地实现 UI。
+// 防重复注入:按需注入(executeScript)可能把本文件重复执行一遍,
+// 若无此 guard 就会注册第二个 onMessage listener,导致一次剪藏存两次。
+if (!window.__clipvaultInjected) {
+  window.__clipvaultInjected = true;
 
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg?.type !== MSG.CAPTURE_TRIGGER) return;
-  handleTrigger(msg).catch((e) => toast('剪藏失败: ' + e.message, true));
-});
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg?.type !== MSG.CAPTURE_TRIGGER) return false;
+    handleTrigger(msg).catch((e) => toast('Clip failed: ' + e.message, true));
+    sendResponse({ received: true }); // 干净关闭消息端口,避免 background 侧误报 lastError
+    return false;
+  });
+}
 
 async function handleTrigger(msg) {
   const clip = await buildClip(msg);
   if (!clip) return;
   const resp = await sendCapture(clip);
   if (!resp?.ok) {
-    toast('剪藏失败', true);
+    toast('Clip failed', true);
     return;
   }
   if (resp.status === 'duplicate') {
-    toast('已存在,未重复保存');
+    toast('Already saved — skipped duplicate');
   }
   showBubble(resp);
 }
@@ -75,7 +81,7 @@ function makeThumbnail(url) {
         resolve(null); // 跨域污染 canvas 时降级为无缩略图
       }
     };
-    img.onerror = () => reject(new Error('图片加载失败'));
+    img.onerror = () => reject(new Error('image failed to load'));
     img.src = url;
   });
 }
@@ -90,18 +96,18 @@ function showBubble(resp) {
   wrap.id = 'clipvault-bubble';
   wrap.innerHTML = `
     <div class="cv-head">
-      <span>✓ 已剪藏到 <b>${escapeHtml(resp.project || '')}</b></span>
-      <button class="cv-x" title="关闭">×</button>
+      <span>&#10003; Saved to <b>${escapeHtml(resp.project || '')}</b></span>
+      <button class="cv-x" title="Close">&times;</button>
     </div>
-    <label class="cv-row"><span>标签</span>
-      <input class="cv-tags" type="text" value="${escapeHtml((resp.tags || []).join(', '))}" placeholder="逗号分隔">
+    <label class="cv-row"><span>Tags</span>
+      <input class="cv-tags" type="text" value="${escapeHtml((resp.tags || []).join(', '))}" placeholder="comma separated">
     </label>
-    <label class="cv-row"><span>备注</span>
-      <input class="cv-note" type="text" placeholder="可选">
+    <label class="cv-row"><span>Note</span>
+      <input class="cv-note" type="text" placeholder="optional">
     </label>
     <div class="cv-actions">
-      <button class="cv-open">打开库</button>
-      <button class="cv-save">保存</button>
+      <button class="cv-open">Open Library</button>
+      <button class="cv-save">Save</button>
     </div>`;
   applyBubbleStyles(wrap);
   document.body.appendChild(wrap);
@@ -116,7 +122,7 @@ function showBubble(resp) {
     const tags = wrap.querySelector('.cv-tags').value.split(',').map((s) => s.trim()).filter(Boolean);
     const note = wrap.querySelector('.cv-note').value.trim();
     chrome.runtime.sendMessage({ type: MSG.SAVE_EDITS, id: resp.id, patch: { tags, note } }, () => {
-      toast('已保存');
+      toast('Saved');
       removeBubble();
     });
   };

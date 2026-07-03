@@ -2,11 +2,11 @@
   "manifest_version": 3,
   "name": "ClipVault",
   "version": "0.1.0",
-  "description": "低摩擦剪藏图片与文本,打标签+归属项目,瀑布流找回。",
-  "permissions": ["contextMenus", "storage", "unlimitedStorage"],
+  "description": "Low-friction clipping for images and text — auto-tag, assign to a project, find them back in a waterfall library.",
+  "permissions": ["contextMenus", "storage", "unlimitedStorage", "scripting"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "service-worker.js" },
-  "action": { "default_title": "打开 ClipVault 库", "default_icon": "icons/icon128.png" },
+  "action": { "default_title": "Open ClipVault library", "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" } },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
@@ -14,5 +14,5 @@
       "run_at": "document_idle"
     }
   ],
-  "icons": { "16": "icons/icon128.png", "48": "icons/icon128.png", "128": "icons/icon128.png" }
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
 }

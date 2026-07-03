@@ -21,11 +21,11 @@ const els = {
 };
 
 const TYPE_LABEL = {
-  [CLIP_TYPES.IMAGE]: '图',
-  [CLIP_TYPES.TEXT]: '文',
-  [CLIP_TYPES.ARTICLE]: '文章',
-  [CLIP_TYPES.VIDEO]: '视频',
-  [CLIP_TYPES.TWEET]: '推',
+  [CLIP_TYPES.IMAGE]: 'IMG',
+  [CLIP_TYPES.TEXT]: 'TEXT',
+  [CLIP_TYPES.ARTICLE]: 'ARTICLE',
+  [CLIP_TYPES.VIDEO]: 'VIDEO',
+  [CLIP_TYPES.TWEET]: 'TWEET',
 };
 
 init();
@@ -53,7 +53,7 @@ function renderSidebar(projects, tags) {
   const projList = [...projSet].sort();
 
   els.projects.innerHTML = '';
-  els.projects.appendChild(makePill('全部', state.project === null, () => {
+  els.projects.appendChild(makePill('All', state.project === null, () => {
     state.project = null;
     renderSidebar(projects, tags);
     renderGrid();
@@ -100,8 +100,8 @@ function renderGrid() {
   });
   els.empty.hidden = filtered.length > 0;
   els.empty.textContent = state.clips.length === 0
-    ? '还没有剪藏。右键页面上的图片或文本开始收集。'
-    : '没有匹配的剪藏。';
+    ? 'Nothing clipped yet. Right-click an image or text on any page to start collecting.'
+    : 'No clips match your filters.';
   els.grid.innerHTML = '';
   for (const clip of filtered) {
     els.grid.appendChild(renderCard(clip));
@@ -164,15 +164,15 @@ function buildActions(clip) {
 
   const open = document.createElement('button');
   open.textContent = '↗';
-  open.title = '打开来源';
+  open.title = 'Open source';
   open.onclick = (e) => { e.stopPropagation(); if (clip.sourceUrl) window.open(clip.sourceUrl, '_blank'); };
 
   const edit = document.createElement('button');
   edit.textContent = '✎';
-  edit.title = '编辑标签/备注';
+  edit.title = 'Edit tags';
   edit.onclick = async (e) => {
     e.stopPropagation();
-    const tagStr = prompt('标签(逗号分隔):', (clip.tags || []).join(', '));
+    const tagStr = prompt('Tags (comma separated):', (clip.tags || []).join(', '));
     if (tagStr === null) return;
     const tags = tagStr.split(',').map((s) => s.trim()).filter(Boolean);
     await updateClip(clip.id, { tags });
@@ -181,10 +181,10 @@ function buildActions(clip) {
 
   const del = document.createElement('button');
   del.textContent = '🗑';
-  del.title = '删除';
+  del.title = 'Delete';
   del.onclick = async (e) => {
     e.stopPropagation();
-    if (!confirm('删除这条剪藏?')) return;
+    if (!confirm('Delete this clip?')) return;
     await deleteClip(clip.id);
     await reload();
   };
@@ -197,7 +197,7 @@ async function renderUsage() {
   const { usage, quota } = await estimateUsage();
   if (!usage) return;
   const mb = (usage / 1024 / 1024).toFixed(1);
-  els.usage.textContent = `已用 ${mb} MB · ${state.clips.length} 条`;
+  els.usage.textContent = `${mb} MB used · ${state.clips.length} clips`;
 }
 
 function debounce(fn, ms) {

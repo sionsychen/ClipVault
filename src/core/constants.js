@@ -21,6 +21,6 @@ export const MSG = {
 };
 
 export const LAST_PROJECT_KEY = 'clipvault:lastProject';
-export const DEFAULT_PROJECT = '未分类';
+export const DEFAULT_PROJECT = 'Unsorted';
 export const TEXT_PREVIEW_LEN = 140; // 库页面文本卡预览截断长度
 export const THUMB_MAX_DIM = 320;    // 缩略图最长边

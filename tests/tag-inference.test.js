@@ -11,15 +11,15 @@ describe('domainOf', () => {
 });
 
 describe('inferTags', () => {
-  it('maps artstation domain to 参考', () => {
-    expect(inferTags('https://www.artstation.com/x', '')).toContain('参考');
+  it('maps artstation domain to reference', () => {
+    expect(inferTags('https://www.artstation.com/x', '')).toContain('reference');
   });
   it('maps title keyword UI to UI tag', () => {
     expect(inferTags('https://example.com', 'A UI Kit for games')).toContain('UI');
   });
   it('combines domain + title tags, deduped', () => {
     const tags = inferTags('https://dribbble.com/x', 'shader study');
-    expect(tags).toContain('设计');
+    expect(tags).toContain('design');
     expect(tags).toContain('shader');
     expect(new Set(tags).size).toBe(tags.length);
   });

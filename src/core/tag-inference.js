@@ -1,10 +1,10 @@
 const DOMAIN_TAGS = {
-  'artstation.com': ['参考'],
-  'pinterest.com': ['参考'],
-  'dribbble.com': ['设计'],
-  'behance.net': ['设计'],
-  'youtube.com': ['视频'],
-  'store.steampowered.com': ['竞品'],
+  'artstation.com': ['reference'],
+  'pinterest.com': ['reference'],
+  'dribbble.com': ['design'],
+  'behance.net': ['design'],
+  'youtube.com': ['video'],
+  'store.steampowered.com': ['competitor'],
   'x.com': ['tweet'],
   'twitter.com': ['tweet'],
 };
@@ -12,8 +12,8 @@ const DOMAIN_TAGS = {
 const TITLE_KEYWORD_TAGS = [
   { kw: 'ui', tag: 'UI' },
   { kw: 'shader', tag: 'shader' },
-  { kw: 'level', tag: '关卡' },
-  { kw: 'concept', tag: '概念' },
+  { kw: 'level', tag: 'level' },
+  { kw: 'concept', tag: 'concept' },
 ];
 
 export function domainOf(url) {
