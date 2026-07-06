@@ -185,21 +185,30 @@ function removeBubble() {
 function applyBubbleStyles(wrap) {
   Object.assign(wrap.style, {
     position: 'fixed', right: '20px', bottom: '20px', zIndex: 2147483647,
-    width: '280px', background: '#fff', color: '#1a1a1a',
-    borderRadius: '10px', boxShadow: '0 8px 32px rgba(0,0,0,.24)',
-    font: '13px/1.5 system-ui, sans-serif', padding: '12px', boxSizing: 'border-box',
+    width: '292px', background: '#221d15', color: '#efe7d8',
+    borderRadius: '14px', boxShadow: '0 18px 48px -12px rgba(0,0,0,.7)',
+    border: '1px solid #362f23',
+    font: '13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif',
+    padding: '14px', boxSizing: 'border-box',
+    animation: 'cvBubbleIn .28s cubic-bezier(.2,.8,.3,1)',
   });
   const style = document.createElement('style');
   style.textContent = `
-    #clipvault-bubble .cv-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-weight:500}
-    #clipvault-bubble .cv-x{border:0;background:none;font-size:18px;cursor:pointer;color:#888;line-height:1}
-    #clipvault-bubble .cv-row{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
-    #clipvault-bubble .cv-row span{font-size:11px;color:#666}
-    #clipvault-bubble .cv-row input{padding:5px 7px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box}
-    #clipvault-bubble .cv-row select{padding:5px 7px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box;background:#fff;color:#1a1a1a}
-    #clipvault-bubble .cv-actions{display:flex;gap:8px;justify-content:flex-end}
-    #clipvault-bubble .cv-actions button{padding:5px 12px;border-radius:6px;border:1px solid #ccc;background:#f5f5f5;cursor:pointer;font-size:12px}
-    #clipvault-bubble .cv-save{background:#2d6cdf;color:#fff;border-color:#2d6cdf}`;
+    @keyframes cvBubbleIn{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
+    #clipvault-bubble .cv-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-weight:600;font-size:13px}
+    #clipvault-bubble .cv-head span{display:inline-flex;align-items:center;gap:6px;color:#e6c473}
+    #clipvault-bubble .cv-x{border:0;background:none;font-size:20px;cursor:pointer;color:#9d9280;line-height:1;padding:0;transition:color .15s}
+    #clipvault-bubble .cv-x:hover{color:#efe7d8}
+    #clipvault-bubble .cv-row{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+    #clipvault-bubble .cv-row span{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#d3a84e}
+    #clipvault-bubble .cv-row input,#clipvault-bubble .cv-row select{padding:8px 10px;border:1px solid #362f23;border-radius:9px;font-size:13px;box-sizing:border-box;background:#1d1912;color:#efe7d8;font-family:inherit}
+    #clipvault-bubble .cv-row input:focus,#clipvault-bubble .cv-row select:focus{outline:none;border-color:#d3a84e;box-shadow:0 0 0 3px #3a2f18}
+    #clipvault-bubble .cv-row input::placeholder{color:#6f6657}
+    #clipvault-bubble .cv-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:4px}
+    #clipvault-bubble .cv-actions button{padding:8px 14px;border-radius:9px;border:1px solid #362f23;background:#1d1912;color:#efe7d8;cursor:pointer;font-size:12px;font-weight:500;font-family:inherit;transition:all .15s}
+    #clipvault-bubble .cv-actions button:hover{border-color:#d3a84e;color:#e6c473}
+    #clipvault-bubble .cv-save{background:linear-gradient(#e6c473,#d3a84e);color:#201a0d;border-color:transparent;font-weight:600}
+    #clipvault-bubble .cv-save:hover{filter:brightness(1.06);color:#201a0d}`;
   wrap.appendChild(style);
 }
 
@@ -208,9 +217,11 @@ function toast(text, isError) {
   t.textContent = text;
   Object.assign(t.style, {
     position: 'fixed', left: '50%', bottom: '32px', transform: 'translateX(-50%)',
-    zIndex: 2147483647, padding: '8px 16px', borderRadius: '8px',
-    background: isError ? '#c0392b' : '#333', color: '#fff',
-    font: '13px system-ui, sans-serif', boxShadow: '0 4px 16px rgba(0,0,0,.3)',
+    zIndex: 2147483647, padding: '10px 18px', borderRadius: '10px',
+    background: isError ? '#3a221a' : '#221d15', color: isError ? '#d67a5c' : '#efe7d8',
+    border: `1px solid ${isError ? '#d67a5c' : '#362f23'}`,
+    font: '13px system-ui, sans-serif', fontWeight: '500',
+    boxShadow: '0 10px 32px -8px rgba(0,0,0,.6)',
   });
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 2200);

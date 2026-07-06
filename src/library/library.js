@@ -1,6 +1,6 @@
 import {
   getAllClips, getProjects, getTags, updateClip, deleteClip,
-  estimateUsage, exportData, importData,
+  estimateUsage, exportData, importData, getFullImage, removeTag,
 } from '../db/clip-store.js';
 import { filterClips } from '../core/search.js';
 import { buildCardModel } from './render.js';
@@ -109,12 +109,25 @@ function renderSidebar(projects, tags) {
   els.tags.innerHTML = '';
   for (const t of tags) {
     const active = state.activeTags.has(t.name);
-    els.tags.appendChild(makePill(t.name, active, () => {
+    const pill = makePill(t.name, active, () => {
       if (active) state.activeTags.delete(t.name);
       else state.activeTags.add(t.name);
       renderSidebar(projects, tags);
       renderGrid();
-    }, t.count));
+    }, t.count);
+    const del = document.createElement('button');
+    del.className = 'pill-del';
+    del.textContent = '×';
+    del.title = `Delete tag "${t.name}" from all clips`;
+    del.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Delete tag "${t.name}" from all clips? This can't be undone.`)) return;
+      await removeTag(t.name);
+      state.activeTags.delete(t.name);
+      await reload();
+    };
+    pill.appendChild(del);
+    els.tags.appendChild(pill);
   }
 }
 
@@ -143,9 +156,12 @@ function renderGrid() {
     ? 'Nothing clipped yet. Right-click an image or text on any page to start collecting.'
     : 'No clips match your filters.';
   els.grid.innerHTML = '';
-  for (const clip of filtered) {
-    els.grid.appendChild(renderCard(clip));
-  }
+  filtered.forEach((clip, i) => {
+    const card = renderCard(clip);
+    // 前若干张错峰入场,再多就不延迟,避免翻大库时长时间空屏
+    if (i < 24) card.style.animationDelay = `${i * 28}ms`;
+    els.grid.appendChild(card);
+  });
   renderSelbar();
 }
 
@@ -276,12 +292,13 @@ async function deleteSelected() {
 
 // ---- 灯箱 ----
 
-function openLightbox(clip, m) {
+let lightboxUrl = null; // 上一张灯箱的 objectURL,切换/关闭时回收
+
+async function openLightbox(clip, m) {
   els.modalBody.innerHTML = '';
   const img = document.createElement('img');
   img.className = 'lightbox-img';
-  // 图片剪藏用原图,视频用封面
-  img.src = clip.type === CLIP_TYPES.IMAGE ? (clip.content || m.image) : m.image;
+  img.src = m.image; // 先挂缩略图,原图到手再替换,避免白屏
   els.modalBody.appendChild(img);
 
   const cap = document.createElement('div');
@@ -301,6 +318,19 @@ function openLightbox(clip, m) {
   }
   els.modalBody.appendChild(cap);
   els.modal.hidden = false;
+
+  // 图片剪藏:优先取存库原图,退而求其次用 content URL。
+  if (clip.type === CLIP_TYPES.IMAGE) {
+    revokeLightboxUrl();
+    const blob = await getFullImage(clip.id).catch(() => null);
+    if (els.modal.hidden) return; // 期间已关闭
+    if (blob) {
+      lightboxUrl = URL.createObjectURL(blob);
+      img.src = lightboxUrl;
+    } else if (clip.content) {
+      img.src = clip.content;
+    }
+  }
 }
 
 // ---- 编辑模态(tags + note + 项目移动) ----
@@ -318,11 +348,8 @@ function openEditModal(clip) {
   const projLabel = labeled('Project', projSel.wrap);
   panel.appendChild(projLabel);
 
-  const tagsInput = document.createElement('input');
-  tagsInput.type = 'text';
-  tagsInput.value = (clip.tags || []).join(', ');
-  tagsInput.placeholder = 'comma separated';
-  panel.appendChild(labeled('Tags', tagsInput));
+  const tagEditor = buildTagEditor(clip.tags || []);
+  panel.appendChild(labeled('Tags', tagEditor.wrap));
 
   const noteInput = document.createElement('input');
   noteInput.type = 'text';
@@ -340,7 +367,7 @@ function openEditModal(clip) {
   save.className = 'tool-btn primary';
   save.textContent = 'Save';
   save.onclick = async () => {
-    const tags = tagsInput.value.split(',').map((s) => s.trim()).filter(Boolean);
+    const tags = tagEditor.value();
     const note = noteInput.value.trim();
     const project = projSel.value() || clip.project;
     await updateClip(clip.id, { tags, note, project });
@@ -352,6 +379,63 @@ function openEditModal(clip) {
 
   els.modalBody.appendChild(panel);
   els.modal.hidden = false;
+}
+
+// tag 编辑:现有 tag 显示为可删 chip(× 单条移除),输入框回车/逗号新增。
+function buildTagEditor(initial) {
+  const tags = [...new Set(initial)];
+  const wrap = document.createElement('div');
+  wrap.className = 'tag-editor';
+  const chips = document.createElement('div');
+  chips.className = 'tag-chips';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'tag-input';
+  input.placeholder = 'add tag, Enter to confirm';
+
+  function renderChips() {
+    chips.innerHTML = '';
+    tags.forEach((tag) => {
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      chip.textContent = tag;
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'chip-x';
+      x.textContent = '×';
+      x.title = 'Remove tag';
+      x.onclick = () => {
+        const i = tags.indexOf(tag);
+        if (i >= 0) tags.splice(i, 1);
+        renderChips();
+      };
+      chip.appendChild(x);
+      chips.appendChild(chip);
+    });
+  }
+
+  function commit() {
+    input.value.split(',').map((s) => s.trim()).filter(Boolean).forEach((t) => {
+      if (!tags.includes(t)) tags.push(t);
+    });
+    input.value = '';
+    renderChips();
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      commit();
+    } else if (e.key === 'Backspace' && !input.value && tags.length) {
+      tags.pop();
+      renderChips();
+    }
+  });
+  input.addEventListener('blur', commit);
+
+  renderChips();
+  wrap.append(chips, input);
+  return { wrap, value: () => { commit(); return [...tags]; } };
 }
 
 // 项目下拉:已有项目 + 当前项目 + "New project…"(选中后显露文本框)
@@ -401,6 +485,14 @@ function labeled(labelText, control) {
 function closeModal() {
   els.modal.hidden = true;
   els.modalBody.innerHTML = '';
+  revokeLightboxUrl();
+}
+
+function revokeLightboxUrl() {
+  if (lightboxUrl) {
+    URL.revokeObjectURL(lightboxUrl);
+    lightboxUrl = null;
+  }
 }
 
 // ---- 导出 / 导入 ----

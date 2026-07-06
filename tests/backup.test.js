@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import 'fake-indexeddb/auto';
 import {
   addClip, getAllClips, deleteClip, getProjects, getTags,
-  exportData, importData,
+  exportData, importData, saveFullImage, getFullImage,
 } from '../src/db/clip-store.js';
 import { DB_NAME } from '../src/core/constants.js';
 
@@ -30,7 +30,7 @@ describe('exportData', () => {
     await addClip(clipB());
     const data = await exportData();
     expect(data.app).toBe('clipvault');
-    expect(data.version).toBe(1);
+    expect(data.version).toBe(2);
     expect(data.clips).toHaveLength(2);
     expect(data.projects).toEqual(expect.arrayContaining(['X6', 'Kitty']));
   });
@@ -70,5 +70,20 @@ describe('importData round-trip', () => {
 
   it('rejects a malformed payload', async () => {
     await expect(importData({ nope: true })).rejects.toThrow();
+  });
+
+  it('round-trips a stored full image through export/import', async () => {
+    const { id } = await addClip(clipA());
+    await saveFullImage(id, new Blob([new Uint8Array([9, 8, 7, 6, 5])], { type: 'image/png' }));
+    const backup = await exportData();
+    expect(backup.clips.find((c) => c.fullImage)?.fullImage).toMatch(/^data:image\/png/);
+
+    await resetDb();
+    await importData(backup);
+    const newId = (await getAllClips())[0].id;
+    const img = await getFullImage(newId);
+    expect(img).toBeInstanceOf(Blob);
+    expect(img.size).toBe(5);
+    expect(img.type).toBe('image/png');
   });
 });

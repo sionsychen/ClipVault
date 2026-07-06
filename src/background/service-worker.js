@@ -1,5 +1,5 @@
 import { MSG, CLIP_TYPES, DEFAULT_PROJECT, LAST_PROJECT_KEY } from '../core/constants.js';
-import { addClip, updateClip, getProjects } from '../db/clip-store.js';
+import { addClip, updateClip, getProjects, saveFullImage } from '../db/clip-store.js';
 import { inferTags } from '../core/tag-inference.js';
 
 const MENU = {
@@ -86,9 +86,25 @@ async function handleCapture(clip) {
     const result = await addClip(record);
     await setLastProject(project);
     const projects = await getProjects();
+    // 图片剪藏:后台抓原图字节存库,不阻塞气泡返回。
+    // background 有 host_permissions,fetch 不受页面 CORS 限制。
+    if (result.status === 'added' && record.type === CLIP_TYPES.IMAGE && record.content) {
+      fetchAndStoreImage(result.id, record.content);
+    }
     return { ok: true, ...result, project, tags, projects };
   } catch (e) {
     return { ok: false, error: String(e) };
+  }
+}
+
+async function fetchAndStoreImage(clipId, url) {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return;
+    const blob = await resp.blob();
+    if (blob.type.startsWith('image/')) await saveFullImage(clipId, blob);
+  } catch {
+    // 抓取失败(防盗链/网络等)静默放弃,灯箱会回退到原 URL。
   }
 }
 

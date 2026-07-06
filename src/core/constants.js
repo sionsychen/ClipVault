@@ -1,9 +1,10 @@
 export const DB_NAME = 'clipvault';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 
 export const STORE_CLIPS = 'clips';
 export const STORE_PROJECTS = 'projects';
 export const STORE_TAGS = 'tags';
+export const STORE_IMAGES = 'images'; // 原图字节,按 clipId 键;列表只读缩略图,灯箱才按需取
 
 export const CLIP_TYPES = {
   IMAGE: 'image',

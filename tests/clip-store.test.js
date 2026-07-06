@@ -3,6 +3,7 @@ import 'fake-indexeddb/auto';
 import {
   addClip, getAllClips, updateClip, deleteClip,
   getProjects, addProject, getTags, bumpTags,
+  removeTag, recountTags, saveFullImage, getFullImage,
 } from '../src/db/clip-store.js';
 import { DB_NAME } from '../src/core/constants.js';
 
@@ -84,5 +85,53 @@ describe('clip-store tags', () => {
     await addClip(sampleClip());
     const tags = await getTags();
     expect(tags.find((t) => t.name === '参考').count).toBe(1);
+  });
+
+  it('removeTag strips a tag from all clips and drops the tag record', async () => {
+    await addClip({ ...sampleClip(), sourceUrl: 'https://s/1', content: 'c1', tags: ['keep', 'drop'] });
+    await addClip({ ...sampleClip(), sourceUrl: 'https://s/2', content: 'c2', tags: ['drop'] });
+    const affected = await removeTag('drop');
+    expect(affected).toBe(2);
+    const all = await getAllClips();
+    expect(all.every((c) => !c.tags.includes('drop'))).toBe(true);
+    expect((await getTags()).find((t) => t.name === 'drop')).toBeUndefined();
+  });
+
+  it('editing a clip to remove a tag lowers its count via recount', async () => {
+    const { id } = await addClip({ ...sampleClip(), tags: ['a', 'b'] });
+    await updateClip(id, { tags: ['a'] });
+    const tags = await getTags();
+    expect(tags.find((t) => t.name === 'a').count).toBe(1);
+    expect(tags.find((t) => t.name === 'b')).toBeUndefined();
+  });
+
+  it('recountTags rebuilds counts from clip state', async () => {
+    await addClip({ ...sampleClip(), sourceUrl: 'https://s/1', content: 'c1', tags: ['x'] });
+    await addClip({ ...sampleClip(), sourceUrl: 'https://s/2', content: 'c2', tags: ['x', 'y'] });
+    await recountTags();
+    const tags = await getTags();
+    expect(tags.find((t) => t.name === 'x').count).toBe(2);
+    expect(tags.find((t) => t.name === 'y').count).toBe(1);
+  });
+});
+
+describe('clip-store full images', () => {
+  const blob = () => new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' });
+
+  it('saves and reads back a full image, and flags the clip', async () => {
+    const { id } = await addClip(sampleClip());
+    await saveFullImage(id, blob());
+    const got = await getFullImage(id);
+    expect(got).toBeInstanceOf(Blob);
+    expect(got.size).toBe(4);
+    const clip = (await getAllClips()).find((c) => c.id === id);
+    expect(clip.gotImage).toBe(true);
+  });
+
+  it('deleteClip also removes the stored image', async () => {
+    const { id } = await addClip(sampleClip());
+    await saveFullImage(id, blob());
+    await deleteClip(id);
+    expect(await getFullImage(id)).toBeNull();
   });
 });
