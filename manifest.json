@@ -3,16 +3,18 @@
   "name": "ClipVault",
   "version": "0.1.0",
   "description": "Low-friction clipping for images and text — auto-tag, assign to a project, find them back in a waterfall library.",
-  "permissions": ["contextMenus", "storage", "unlimitedStorage", "scripting"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": ["contextMenus", "storage", "unlimitedStorage", "scripting", "activeTab"],
   "background": { "service_worker": "service-worker.js" },
   "action": { "default_title": "Open ClipVault library", "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" } },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content-script.js"],
-      "run_at": "document_idle"
+  "commands": {
+    "clip-selection": {
+      "suggested_key": { "default": "Alt+Shift+C" },
+      "description": "Clip the current selection (or page)"
+    },
+    "open-library": {
+      "suggested_key": { "default": "Alt+Shift+L" },
+      "description": "Open the ClipVault library"
     }
-  ],
+  },
   "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
 }

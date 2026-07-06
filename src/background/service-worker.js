@@ -1,5 +1,5 @@
 import { MSG, CLIP_TYPES, DEFAULT_PROJECT, LAST_PROJECT_KEY } from '../core/constants.js';
-import { addClip, updateClip, getProjects, saveFullImage } from '../db/clip-store.js';
+import { addClip, getProjects, saveFullImage } from '../db/clip-store.js';
 import { inferTags } from '../core/tag-inference.js';
 
 const MENU = {
@@ -34,32 +34,43 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   sendToTab(tab.id, payload);
 });
 
-// 老标签页在装扩展前打开,没注入 content script,直接 sendMessage 会
-// "Receiving end does not exist"。仅在这种错误下按需注入再重发一次;
-// 其它 lastError(如 message port closed)不重发,避免重复保存。
-function sendToTab(tabId, payload) {
-  chrome.tabs.sendMessage(tabId, payload, () => {
-    const err = chrome.runtime.lastError;
-    if (!err) return;
-    if (!/Receiving end does not exist/i.test(err.message || '')) return;
-    chrome.scripting.executeScript(
-      { target: { tabId }, files: ['content-script.js'] },
-      () => {
-        if (chrome.runtime.lastError) return; // chrome:// 等页面无法注入,静默放弃
-        chrome.tabs.sendMessage(tabId, payload, () => void chrome.runtime.lastError);
-      }
-    );
+// 键盘快捷键。注意:快捷键手势授予 activeTab(可注入),但不带光标下的图片/
+// 选区信息,所以只能剪「选区或整页」——由 content script 自己读 selection。
+chrome.commands.onCommand.addListener((command) => {
+  if (command === 'open-library') return void openLibrary();
+  if (command !== 'clip-selection') return;
+  chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+    if (!tab?.id) return;
+    sendToTab(tab.id, {
+      type: MSG.CAPTURE_TRIGGER,
+      menuId: 'clipvault-shortcut',
+      pageUrl: tab.url || '',
+    });
   });
+});
+
+// content script 不再常驻(activeTab 模型):每次右键点击都按需注入。
+// 右键点击授予 activeTab,故 executeScript 被许可。content-script 顶部的
+// __clipvaultInjected 守卫保证重复注入不会二次注册监听器 → 不会重复保存。
+// 注入回调里才发消息,确保监听器已注册。
+function sendToTab(tabId, payload) {
+  chrome.scripting.executeScript(
+    { target: { tabId }, files: ['content-script.js'] },
+    () => {
+      if (chrome.runtime.lastError) return; // chrome:// 等受限页面无法注入,静默放弃
+      chrome.tabs.sendMessage(tabId, payload, () => void chrome.runtime.lastError);
+    }
+  );
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === MSG.PREPARE) {
+    handlePrepare(msg.clip).then(sendResponse);
+    return true; // async
+  }
   if (msg?.type === MSG.CAPTURE) {
     handleCapture(msg.clip).then(sendResponse);
     return true; // async
-  }
-  if (msg?.type === MSG.SAVE_EDITS) {
-    updateClip(msg.id, msg.patch).then((r) => sendResponse({ ok: !!r })).catch(() => sendResponse({ ok: false }));
-    return true;
   }
   if (msg?.type === 'clipvault:openLibrary') {
     openLibrary();
@@ -67,6 +78,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   return false;
 });
+
+// 只读:算出默认项目、推断标签、项目列表,喂给气泡预填。不碰库。
+async function handlePrepare(clip) {
+  try {
+    const project = clip.project || (await lastProject()) || DEFAULT_PROJECT;
+    const inferred = inferTags(clip.sourceUrl, clip.pageTitle);
+    const tags = [...new Set([...(clip.tags || []), ...inferred])];
+    const projects = await getProjects();
+    return { ok: true, project, tags, projects };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
 
 async function handleCapture(clip) {
   try {
@@ -86,8 +110,9 @@ async function handleCapture(clip) {
     const result = await addClip(record);
     await setLastProject(project);
     const projects = await getProjects();
-    // 图片剪藏:后台抓原图字节存库,不阻塞气泡返回。
-    // background 有 host_permissions,fetch 不受页面 CORS 限制。
+    // 图片剪藏:后台尝试抓原图字节存库,不阻塞气泡返回。
+    // activeTab 模型下没有广域 host 权限,跨域图片可能被 CORS 拦(抓不到就
+    // 静默放弃,灯箱回退到 content URL)。Phase 2 会在卡片上标「仅链接」。
     if (result.status === 'added' && record.type === CLIP_TYPES.IMAGE && record.content) {
       fetchAndStoreImage(result.id, record.content);
     }
