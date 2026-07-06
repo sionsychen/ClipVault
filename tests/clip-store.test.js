@@ -4,8 +4,9 @@ import {
   addClip, getAllClips, updateClip, deleteClip,
   getProjects, addProject, getTags, bumpTags,
   removeTag, recountTags, saveFullImage, getFullImage,
+  removeProject,
 } from '../src/db/clip-store.js';
-import { DB_NAME } from '../src/core/constants.js';
+import { DB_NAME, DEFAULT_PROJECT } from '../src/core/constants.js';
 
 function resetDb() {
   return new Promise((resolve) => {
@@ -69,6 +70,35 @@ describe('clip-store projects', () => {
     expect(await getProjects()).toContain('Moodboard');
     const all = await getAllClips();
     expect(all[0].project).toBe('Moodboard');
+  });
+
+  it('removeProject moves its clips to the default project and drops the record', async () => {
+    const { id } = await addClip(sampleClip()); // project: 'X6'
+    await addProject('X6');
+    const n = await removeProject('X6');
+    expect(n).toBe(1);
+    expect(await getProjects()).not.toContain('X6');
+    const all = await getAllClips();
+    expect(all[0].id).toBe(id); // clip 未被删
+    expect(all[0].project).toBe(DEFAULT_PROJECT);
+  });
+
+  it('removeProject only touches clips in that project', async () => {
+    await addClip(sampleClip()); // X6
+    await addClip({ ...sampleClip(), sourceUrl: 'https://other', content: 'https://other/i.jpg', project: 'Kitty' });
+    const n = await removeProject('X6');
+    expect(n).toBe(1);
+    const all = await getAllClips();
+    const kitty = all.find((c) => c.project === 'Kitty');
+    expect(kitty).toBeTruthy(); // Kitty 不受影响
+  });
+
+  it('removeProject refuses to delete the default project (no-op)', async () => {
+    await addClip({ ...sampleClip(), project: DEFAULT_PROJECT });
+    const n = await removeProject(DEFAULT_PROJECT);
+    expect(n).toBe(0);
+    const all = await getAllClips();
+    expect(all[0].project).toBe(DEFAULT_PROJECT);
   });
 });
 

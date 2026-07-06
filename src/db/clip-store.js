@@ -1,5 +1,6 @@
 import {
   DB_NAME, DB_VERSION, STORE_CLIPS, STORE_PROJECTS, STORE_TAGS, STORE_IMAGES,
+  DEFAULT_PROJECT,
 } from '../core/constants.js';
 import { makeClipKey } from '../core/clip-key.js';
 
@@ -214,6 +215,31 @@ export async function removeTag(name) {
     await txDone(t);
     return affected;
   });
+}
+
+// 删项目:把该项目下所有 clip 的 project 改回 DEFAULT_PROJECT,再删项目记录。
+// clip 一条不丢(project 不进 clipKey,所以改归属不影响去重)。返回受影响的 clip 数。
+// 删默认项目视为 no-op(它是兜底归属,不该被删)。
+export async function removeProject(name) {
+  if (!name || name === DEFAULT_PROJECT) return 0;
+  const affected = await withDb(async (db) => {
+    const t = db.transaction([STORE_CLIPS, STORE_PROJECTS], 'readwrite');
+    const clipStore = t.objectStore(STORE_CLIPS);
+    const clips = await reqToPromise(clipStore.getAll());
+    let n = 0;
+    for (const c of clips) {
+      if (c.project === name) {
+        await reqToPromise(clipStore.put({ ...c, project: DEFAULT_PROJECT }));
+        n++;
+      }
+    }
+    await reqToPromise(t.objectStore(STORE_PROJECTS).delete(name));
+    await txDone(t);
+    return n;
+  });
+  // 有 clip 被移过来时,保证 Unsorted 作为项目存在(侧栏能列出)。
+  if (affected) await addProject(DEFAULT_PROJECT);
+  return affected;
 }
 
 // 从 clip 现状重算全部 tag 计数,把结果覆盖进 tags 库(删除已无引用的 tag)。
