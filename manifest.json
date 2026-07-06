@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ClipVault",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Low-friction clipping for images and text — auto-tag, assign to a project, find them back in a waterfall library.",
   "permissions": ["contextMenus", "storage", "unlimitedStorage", "scripting", "activeTab"],
   "background": { "service_worker": "service-worker.js" },
