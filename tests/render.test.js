@@ -33,4 +33,17 @@ describe('buildCardModel', () => {
     expect(m.image).toBeNull();
     expect(m.previewText).toBe('https://x.com/u/status/1');
   });
+
+  it('image clip without stored full image is flagged linkOnly', () => {
+    const m = buildCardModel({ id: 6, type: 'image', content: 'http://cdn/x.jpg', thumbnail: 'data:...' });
+    expect(m.linkOnly).toBe(true);
+  });
+  it('image clip with stored full image is not linkOnly', () => {
+    const m = buildCardModel({ id: 7, type: 'image', content: 'http://cdn/x.jpg', thumbnail: 'data:...', gotImage: true });
+    expect(m.linkOnly).toBe(false);
+  });
+  it('non-image clips are never linkOnly', () => {
+    expect(buildCardModel({ id: 8, type: 'text', content: 'hi' }).linkOnly).toBe(false);
+    expect(buildCardModel({ id: 9, type: 'video', content: 'http://v' }).linkOnly).toBe(false);
+  });
 });

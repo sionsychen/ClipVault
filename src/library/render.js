@@ -10,6 +10,9 @@ export function buildCardModel(clip) {
     type: clip.type,
     image: image || null,
     isVideo: clip.type === CLIP_TYPES.VIDEO,
+    // 图片剪藏但没抓到全分辨率原图(常见于跨域 CORS)→ 只剩链接/缩略图,
+    // 源站图挂了原图就没了。卡片上给个提示。
+    linkOnly: clip.type === CLIP_TYPES.IMAGE && !clip.gotImage,
     previewText: (previewSource || '').slice(0, TEXT_PREVIEW_LEN),
     title: clip.pageTitle || '',
     sourceUrl: clip.sourceUrl || '',

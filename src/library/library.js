@@ -1,13 +1,18 @@
 import {
   getAllClips, getProjects, getTags, updateClip, deleteClip,
   estimateUsage, exportData, importData, getFullImage, removeTag,
+  addClip, saveFullImage, removeProject,
 } from '../db/clip-store.js';
 import { filterClips } from '../core/search.js';
 import { buildCardModel } from './render.js';
-import { CLIP_TYPES } from '../core/constants.js';
+import {
+  CLIP_TYPES, LAST_BACKUP_KEY, BACKUP_SNOOZE_KEY,
+  STORAGE_WARN_RATIO, BACKUP_STALE_MS, BACKUP_SNOOZE_MS, DEFAULT_PROJECT,
+} from '../core/constants.js';
 
 const state = {
   clips: [],
+  filtered: [], // 当前筛选/搜索后的可见集合(灯箱翻页用)
   project: null,
   activeTags: new Set(),
   query: '',
@@ -35,6 +40,11 @@ const els = {
   modal: document.getElementById('modal'),
   modalBody: document.querySelector('#modal .modal-body'),
   modalBackdrop: document.querySelector('#modal .modal-backdrop'),
+  backupBanner: document.getElementById('backup-banner'),
+  backupMsg: document.querySelector('#backup-banner .backup-msg'),
+  backupNow: document.getElementById('backup-now'),
+  backupSnooze: document.getElementById('backup-snooze'),
+  toasts: document.getElementById('toasts'),
 };
 
 const TYPE_LABEL = {
@@ -44,6 +54,64 @@ const TYPE_LABEL = {
   [CLIP_TYPES.VIDEO]: 'VIDEO',
   [CLIP_TYPES.TWEET]: 'TWEET',
 };
+
+// Inline Lucide-style icons (stroke, 24-grid). Avoids emoji/unicode glyphs,
+// which render inconsistently across platforms and read as filler.
+const ICON_PATHS = {
+  open: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  play: '<polygon points="6 3 20 12 6 21 6 3"/>',
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  chevronLeft: '<path d="m15 18-6-6 6-6"/>',
+  chevronRight: '<path d="m9 18 6-6-6-6"/>',
+};
+
+function icon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'icon');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.innerHTML = ICON_PATHS[name];
+  return svg;
+}
+
+// ---- toast(含可选 Undo 动作)----
+// 替代原生 alert/confirm:非阻塞,不打断,契合中性风格。
+function showToast(message, { actionLabel, onAction, duration = 5000, danger = false } = {}) {
+  const t = document.createElement('div');
+  t.className = 'toast' + (danger ? ' danger' : '');
+  const msg = document.createElement('span');
+  msg.className = 'toast-msg';
+  msg.textContent = message;
+  t.appendChild(msg);
+
+  let timer;
+  const dismiss = () => {
+    clearTimeout(timer);
+    t.classList.add('out');
+    t.addEventListener('animationend', () => t.remove(), { once: true });
+    // 兜底:动画被 reduced-motion 关掉时直接移除
+    setTimeout(() => t.remove(), 250);
+  };
+
+  if (actionLabel && onAction) {
+    const btn = document.createElement('button');
+    btn.className = 'toast-action';
+    btn.textContent = actionLabel;
+    btn.onclick = () => { dismiss(); onAction(); };
+    t.appendChild(btn);
+  }
+
+  els.toasts.appendChild(t);
+  timer = setTimeout(dismiss, duration);
+  return dismiss;
+}
 
 init();
 
@@ -64,9 +132,22 @@ async function init() {
   els.import.addEventListener('click', () => els.importFile.click());
   els.importFile.addEventListener('change', doImport);
   els.modalBackdrop.addEventListener('click', closeModal);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+  els.backupNow.addEventListener('click', () => { doExportJson(); });
+  els.backupSnooze.addEventListener('click', snoozeBackupReminder);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') return closeModal();
+    // 灯箱开着时方向键翻页(编辑模态开着时不翻)。
+    if (!lightboxOpen || els.modal.hidden) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const dir = e.key === 'ArrowLeft' ? -1 : 1;
+      const cur = lightboxClipId;
+      const next = cur != null ? adjacentImageClip(cur, dir) : null;
+      if (next) openLightbox(next.clip, next.m);
+    }
+  });
   await reload();
   renderUsage();
+  refreshBackupReminder();
 }
 
 function sortClips() {
@@ -83,6 +164,7 @@ async function reload() {
   state.selected.forEach((id) => { if (!ids.has(id)) state.selected.delete(id); });
   renderSidebar(projects, tags);
   renderGrid();
+  refreshBackupReminder();
 }
 
 function renderSidebar(projects, tags) {
@@ -99,11 +181,36 @@ function renderSidebar(projects, tags) {
     renderGrid();
   }));
   for (const p of projList) {
-    els.projects.appendChild(makePill(p, state.project === p, () => {
+    const pill = makePill(p, state.project === p, () => {
       state.project = state.project === p ? null : p;
       renderSidebar(projects, tags);
       renderGrid();
-    }));
+    });
+    // 默认项目(Unsorted)是兜底归属,不给删除入口。
+    if (p !== DEFAULT_PROJECT) {
+      const del = document.createElement('button');
+      del.className = 'pill-del';
+      del.appendChild(icon('x'));
+      del.title = `Delete project "${p}" (clips move to ${DEFAULT_PROJECT})`;
+      del.setAttribute('aria-label', `Delete project ${p}, moving its clips to ${DEFAULT_PROJECT}`);
+      del.onclick = async (e) => {
+        e.stopPropagation();
+        // 记下受影响的 clip,供撤销时归还原项目。
+        const affected = state.clips.filter((c) => c.project === p).map((c) => c.id);
+        await removeProject(p);
+        if (state.project === p) state.project = null;
+        await reload();
+        showToast(`Deleted project "${p}" · ${affected.length} clip${affected.length === 1 ? '' : 's'} moved to ${DEFAULT_PROJECT}`, {
+          actionLabel: 'Undo',
+          onAction: async () => {
+            for (const id of affected) await updateClip(id, { project: p });
+            await reload();
+          },
+        });
+      };
+      pill.appendChild(del);
+    }
+    els.projects.appendChild(pill);
   }
 
   els.tags.innerHTML = '';
@@ -117,14 +224,27 @@ function renderSidebar(projects, tags) {
     }, t.count);
     const del = document.createElement('button');
     del.className = 'pill-del';
-    del.textContent = '×';
+    del.appendChild(icon('x'));
     del.title = `Delete tag "${t.name}" from all clips`;
+    del.setAttribute('aria-label', `Delete tag ${t.name} from all clips`);
     del.onclick = async (e) => {
       e.stopPropagation();
-      if (!confirm(`Delete tag "${t.name}" from all clips? This can't be undone.`)) return;
+      // 记下带此 tag 的 clip,供撤销时逐个加回。
+      const affected = state.clips.filter((c) => c.tags?.includes(t.name)).map((c) => c.id);
       await removeTag(t.name);
       state.activeTags.delete(t.name);
       await reload();
+      showToast(`Removed tag "${t.name}" from ${affected.length} clip${affected.length === 1 ? '' : 's'}`, {
+        actionLabel: 'Undo',
+        onAction: async () => {
+          for (const id of affected) {
+            const clip = state.clips.find((x) => x.id === id);
+            const tags = [...new Set([...(clip?.tags || []), t.name])];
+            await updateClip(id, { tags });
+          }
+          await reload();
+        },
+      });
     };
     pill.appendChild(del);
     els.tags.appendChild(pill);
@@ -151,6 +271,7 @@ function renderGrid() {
     tags: [...state.activeTags],
     query: state.query,
   });
+  state.filtered = filtered; // 灯箱 ←/→ 在这个可见集合里翻
   els.empty.hidden = filtered.length > 0;
   els.empty.textContent = state.clips.length === 0
     ? 'Nothing clipped yet. Right-click an image or text on any page to start collecting.'
@@ -185,7 +306,7 @@ function renderCard(clip) {
   card.appendChild(check);
 
   const badge = document.createElement('span');
-  badge.className = 'type-badge';
+  badge.className = 'type-badge' + (m.image ? '' : ' on-light');
   badge.textContent = TYPE_LABEL[m.type] || m.type;
   card.appendChild(badge);
 
@@ -200,8 +321,16 @@ function renderCard(clip) {
     if (m.isVideo) {
       const play = document.createElement('span');
       play.className = 'play-badge';
-      play.textContent = '▶';
+      play.appendChild(icon('play'));
       frame.appendChild(play);
+    }
+    if (m.linkOnly) {
+      const lo = document.createElement('span');
+      lo.className = 'link-only';
+      lo.appendChild(icon('open'));
+      lo.append('Link only');
+      lo.title = 'Full-resolution image was not saved (cross-origin). Shows thumbnail; opens source for the original.';
+      frame.appendChild(lo);
     }
     frame.onclick = () => openLightbox(clip, m);
     frame.style.cursor = 'pointer';
@@ -243,24 +372,25 @@ function buildActions(clip) {
   wrap.className = 'card-actions';
 
   const open = document.createElement('button');
-  open.textContent = '↗';
+  open.appendChild(icon('open'));
   open.title = 'Open source';
+  open.setAttribute('aria-label', 'Open source page');
   open.onclick = (e) => { e.stopPropagation(); if (clip.sourceUrl) window.open(clip.sourceUrl, '_blank'); };
 
   const edit = document.createElement('button');
-  edit.textContent = '✎';
+  edit.appendChild(icon('edit'));
   edit.title = 'Edit';
+  edit.setAttribute('aria-label', 'Edit clip');
   edit.onclick = (e) => { e.stopPropagation(); openEditModal(clip); };
 
   const del = document.createElement('button');
-  del.textContent = '🗑';
+  del.className = 'danger';
+  del.appendChild(icon('trash'));
   del.title = 'Delete';
-  del.onclick = async (e) => {
+  del.setAttribute('aria-label', 'Delete clip');
+  del.onclick = (e) => {
     e.stopPropagation();
-    if (!confirm('Delete this clip?')) return;
-    await deleteClip(clip.id);
-    state.selected.delete(clip.id);
-    await reload();
+    deleteWithUndo([clip]);
   };
 
   wrap.append(open, edit, del);
@@ -283,19 +413,57 @@ function clearSelection() {
 async function deleteSelected() {
   const n = state.selected.size;
   if (!n) return;
-  if (!confirm(`Delete ${n} selected clip${n > 1 ? 's' : ''}?`)) return;
-  for (const id of state.selected) await deleteClip(id);
+  const clips = state.clips.filter((c) => state.selected.has(c.id));
   state.selected.clear();
+  await deleteWithUndo(clips);
+}
+
+// 删除即时执行(不再弹 confirm),给一个 Undo toast 兜底。
+// 撤销 = 重插记录 + 原图 Blob。addClip 保留 createdAt,所以排序位置能复原。
+async function deleteWithUndo(clips) {
+  if (!clips.length) return;
+  // 删前抓齐原图 Blob,供撤销时还原。
+  const snapshots = await Promise.all(clips.map(async (c) => ({
+    clip: c,
+    blob: c.gotImage ? await getFullImage(c.id).catch(() => null) : null,
+  })));
+  for (const c of clips) {
+    await deleteClip(c.id);
+    state.selected.delete(c.id);
+  }
   await reload();
   renderUsage();
+
+  const n = clips.length;
+  showToast(`Deleted ${n} clip${n === 1 ? '' : 's'}`, {
+    actionLabel: 'Undo',
+    onAction: async () => {
+      for (const { clip, blob } of snapshots) {
+        const { id } = await addClip(clip); // clipKey 去重:已存在则命中原记录
+        if (blob) await saveFullImage(id, blob);
+      }
+      await reload();
+      renderUsage();
+    },
+  });
 }
 
 // ---- 灯箱 ----
 
 let lightboxUrl = null; // 上一张灯箱的 objectURL,切换/关闭时回收
+let lightboxOpen = false;
+let lightboxClipId = null;
 
 async function openLightbox(clip, m) {
+  lightboxOpen = true;
+  lightboxClipId = clip.id;
   els.modalBody.innerHTML = '';
+
+  const nav = (dir) => {
+    const next = adjacentImageClip(clip.id, dir);
+    if (next) openLightbox(next.clip, next.m);
+  };
+
   const img = document.createElement('img');
   img.className = 'lightbox-img';
   img.src = m.image; // 先挂缩略图,原图到手再替换,避免白屏
@@ -317,6 +485,13 @@ async function openLightbox(clip, m) {
     cap.appendChild(a);
   }
   els.modalBody.appendChild(cap);
+
+  // 上一张/下一张按钮:仅当可见集合里有多张带图的 clip 才显示。
+  if (countImageClips() > 1) {
+    els.modalBody.appendChild(makeNavButton('prev', () => nav(-1)));
+    els.modalBody.appendChild(makeNavButton('next', () => nav(1)));
+  }
+
   els.modal.hidden = false;
 
   // 图片剪藏:优先取存库原图,退而求其次用 content URL。
@@ -331,6 +506,34 @@ async function openLightbox(clip, m) {
       img.src = clip.content;
     }
   }
+}
+
+// 可见集合里带缩略图/图的 clip(灯箱可翻的那些)。
+function imageClipsInView() {
+  return state.filtered
+    .map((c) => ({ clip: c, m: buildCardModel(c) }))
+    .filter((x) => x.m.image);
+}
+function countImageClips() {
+  return imageClipsInView().length;
+}
+// 相对当前 clip 的上/下一张(带图),循环。
+function adjacentImageClip(currentId, dir) {
+  const list = imageClipsInView();
+  if (list.length < 2) return null;
+  const i = list.findIndex((x) => x.clip.id === currentId);
+  if (i < 0) return null;
+  const j = (i + dir + list.length) % list.length;
+  return list[j];
+}
+
+function makeNavButton(dir, onClick) {
+  const btn = document.createElement('button');
+  btn.className = `lightbox-nav ${dir}`;
+  btn.setAttribute('aria-label', dir === 'prev' ? 'Previous' : 'Next');
+  btn.appendChild(icon(dir === 'prev' ? 'chevronLeft' : 'chevronRight'));
+  btn.onclick = (e) => { e.stopPropagation(); onClick(); };
+  return btn;
 }
 
 // ---- 编辑模态(tags + note + 项目移动) ----
@@ -402,8 +605,9 @@ function buildTagEditor(initial) {
       const x = document.createElement('button');
       x.type = 'button';
       x.className = 'chip-x';
-      x.textContent = '×';
+      x.appendChild(icon('x'));
       x.title = 'Remove tag';
+      x.setAttribute('aria-label', `Remove tag ${tag}`);
       x.onclick = () => {
         const i = tags.indexOf(tag);
         if (i >= 0) tags.splice(i, 1);
@@ -485,6 +689,8 @@ function labeled(labelText, control) {
 function closeModal() {
   els.modal.hidden = true;
   els.modalBody.innerHTML = '';
+  lightboxOpen = false;
+  lightboxClipId = null;
   revokeLightboxUrl();
 }
 
@@ -504,6 +710,10 @@ async function doExportJson() {
     `clipvault-backup-${dateStamp()}.json`,
     'application/json'
   );
+  // 记下备份时间,清掉暂缓,收起提醒。整库 JSON 才算备份,Markdown 不算。
+  localStorage.setItem(LAST_BACKUP_KEY, String(Date.now()));
+  localStorage.removeItem(BACKUP_SNOOZE_KEY);
+  refreshBackupReminder();
 }
 
 async function doExportMarkdown() {
@@ -519,9 +729,9 @@ async function doImport(e) {
     const r = await importData(payload);
     await reload();
     renderUsage();
-    alert(`Imported ${r.added} new clip${r.added === 1 ? '' : 's'}, skipped ${r.skipped} duplicate${r.skipped === 1 ? '' : 's'}.`);
+    showToast(`Imported ${r.added} new clip${r.added === 1 ? '' : 's'}, skipped ${r.skipped} duplicate${r.skipped === 1 ? '' : 's'}.`);
   } catch (err) {
-    alert('Import failed: ' + err.message);
+    showToast('Import failed: ' + err.message, { danger: true, duration: 7000 });
   } finally {
     e.target.value = ''; // 允许再次选同一文件
   }
@@ -556,13 +766,56 @@ function dateStamp() {
 }
 
 async function renderUsage() {
-  const { usage } = await estimateUsage();
+  const { usage, quota } = await estimateUsage();
   if (!usage) {
     els.usage.textContent = `${state.clips.length} clips`;
+    els.usage.classList.remove('warn');
     return;
   }
   const mb = (usage / 1024 / 1024).toFixed(1);
-  els.usage.textContent = `${mb} MB used · ${state.clips.length} clips`;
+  const near = quota && usage / quota >= STORAGE_WARN_RATIO;
+  els.usage.classList.toggle('warn', !!near);
+  if (near) {
+    const pct = Math.round((usage / quota) * 100);
+    els.usage.textContent = `⚠ Storage ${pct}% full · export a backup`;
+    els.usage.title = `${mb} MB of ${(quota / 1024 / 1024).toFixed(0)} MB used. Approaching the browser limit — export a backup to avoid losing clips.`;
+  } else {
+    els.usage.textContent = `${mb} MB used · ${state.clips.length} clips`;
+    els.usage.title = '';
+  }
+}
+
+// ---- 备份提醒(阶段 2:数据安全)----
+// 库非空、距上次整库备份超阈值、且不在暂缓期 → 顶部提示导出。
+// localStorage 存在库页面(与 clip 的 IndexedDB 分开),清缓存两者一起没,
+// 提醒的意义正是催用户在清缓存/换设备前导出。
+function refreshBackupReminder() {
+  const n = state.clips.length;
+  const last = Number(localStorage.getItem(LAST_BACKUP_KEY)) || 0;
+  const snoozeUntil = Number(localStorage.getItem(BACKUP_SNOOZE_KEY)) || 0;
+  const now = Date.now();
+  const stale = now - last >= BACKUP_STALE_MS; // last=0 时必 stale
+  const snoozed = now < snoozeUntil;
+  const show = n > 0 && stale && !snoozed;
+
+  els.backupBanner.hidden = !show;
+  if (!show) return;
+
+  els.backupMsg.textContent = last
+    ? `Your last backup was ${daysAgo(now - last)}. Export a backup to keep your ${n} clip${n === 1 ? '' : 's'} safe.`
+    : `You have ${n} clip${n === 1 ? '' : 's'} and no backup yet. Clips live only in this browser — export a backup so you don't lose them.`;
+}
+
+function snoozeBackupReminder() {
+  localStorage.setItem(BACKUP_SNOOZE_KEY, String(Date.now() + BACKUP_SNOOZE_MS));
+  refreshBackupReminder();
+}
+
+function daysAgo(ms) {
+  const days = Math.floor(ms / (24 * 60 * 60 * 1000));
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  return `${days} days ago`;
 }
 
 function debounce(fn, ms) {
