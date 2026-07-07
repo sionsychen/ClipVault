@@ -1,5 +1,7 @@
 # ClipVault
 
+> **English** · [简体中文](README.zh-CN.md)
+
 Low-friction clipping for images and text. Right-click anything worth keeping — an image, a passage, a link, a whole page — and it drops into a private library that lives entirely on your own device. Auto-tag it, sort it into projects, search it back, export it anytime.
 
 No account. No cloud. No tracking. No servers.
@@ -21,6 +23,10 @@ No account. No cloud. No tracking. No servers.
 | `Alt+Shift+L` | Open the ClipVault library |
 
 Right-click also exposes **Clip this image / selection / link / page** context-menu items. Shortcuts can be rebound at `chrome://extensions/shortcuts`.
+
+## Language
+
+The library's topbar gear icon (Settings) lets you switch the interface language: **Auto (browser) / English / 简体中文**. It defaults to your browser language and remembers your choice.
 
 ## Install (unpacked, for development)
 
@@ -47,7 +53,7 @@ npm run test:watch  # watch mode
 
 - `src/background/` — service worker: context menus, keyboard commands, on-demand injection, capture handling
 - `src/content/` — content script: builds the clip, renders the save bubble (injected on demand, never persistent)
-- `src/core/` — pure logic: clip keys, media-type detection, tag inference, search, thumbnails
+- `src/core/` — pure logic: clip keys, media-type detection, tag inference, search, thumbnails, i18n
 - `src/db/` — IndexedDB store
 - `src/library/` — the library page (HTML/CSS/JS)
 - `store/` — Chrome Web Store submission material (not shipped in the extension)
