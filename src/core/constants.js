@@ -24,6 +24,7 @@ export const MSG = {
 export const LAST_PROJECT_KEY = 'clipvault:lastProject';
 export const LAST_BACKUP_KEY = 'clipvault:lastBackup';   // 上次导出备份的时间戳(ms)
 export const BACKUP_SNOOZE_KEY = 'clipvault:backupSnooze'; // 备份提醒暂缓到期时间戳(ms)
+export const LANG_KEY = 'clipvault:lang';                // 界面语言偏好: 'auto' | 'en' | 'zh'
 export const DEFAULT_PROJECT = 'Unsorted';
 export const TEXT_PREVIEW_LEN = 140; // 库页面文本卡预览截断长度
 export const THUMB_MAX_DIM = 320;    // 缩略图最长边

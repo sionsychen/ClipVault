@@ -3,40 +3,41 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ClipVault Library</title>
+  <title data-i18n="app.title">ClipVault Library</title>
   <link rel="stylesheet" href="library.css">
 </head>
 <body>
   <header class="topbar">
     <div class="brand">ClipVault</div>
-    <input id="search" class="search" type="search" placeholder="Search title, text, tags, notes…" aria-label="Search clips">
-    <select id="sort" class="sort" aria-label="Sort order">
-      <option value="newest">Newest</option>
-      <option value="oldest">Oldest</option>
+    <input id="search" class="search" type="search" data-i18n-ph="search.placeholder" data-i18n-aria="search.aria" placeholder="Search title, text, tags, notes…" aria-label="Search clips">
+    <select id="sort" class="sort" data-i18n-aria="sort.aria" aria-label="Sort order">
+      <option value="newest" data-i18n="sort.newest">Newest</option>
+      <option value="oldest" data-i18n="sort.oldest">Oldest</option>
     </select>
-    <button id="export" class="tool-btn" title="Export backup (JSON)">Export</button>
-    <button id="export-md" class="tool-btn" title="Export as Markdown">Markdown</button>
-    <button id="import" class="tool-btn" title="Import backup (JSON)">Import</button>
+    <button id="export" class="tool-btn" data-i18n="toolbar.export" data-i18n-title="toolbar.export.title" title="Export backup (JSON)">Export</button>
+    <button id="export-md" class="tool-btn" data-i18n="toolbar.markdown" data-i18n-title="toolbar.markdown.title" title="Export as Markdown">Markdown</button>
+    <button id="import" class="tool-btn" data-i18n="toolbar.import" data-i18n-title="toolbar.import.title" title="Import backup (JSON)">Import</button>
     <input id="import-file" type="file" accept="application/json,.json" hidden>
+    <button id="settings" class="icon-btn" data-i18n-title="toolbar.settings.aria" data-i18n-aria="toolbar.settings.aria" title="Settings" aria-label="Settings"></button>
     <span id="usage" class="usage"></span>
   </header>
 
   <div id="backup-banner" class="backup-banner" hidden role="status">
     <span class="backup-msg"></span>
     <div class="backup-actions">
-      <button id="backup-now" class="tool-btn">Export backup now</button>
-      <button id="backup-snooze" class="tool-btn">Later</button>
+      <button id="backup-now" class="tool-btn" data-i18n="backup.now">Export backup now</button>
+      <button id="backup-snooze" class="tool-btn" data-i18n="backup.later">Later</button>
     </div>
   </div>
 
   <div class="layout">
     <aside class="sidebar">
       <section>
-        <h3>Projects</h3>
+        <h3 data-i18n="sidebar.projects">Projects</h3>
         <ul id="projects" class="pill-list"></ul>
       </section>
       <section>
-        <h3>Tags</h3>
+        <h3 data-i18n="sidebar.tags">Tags</h3>
         <ul id="tags" class="pill-list"></ul>
       </section>
     </aside>
@@ -45,11 +46,11 @@
       <div id="selbar" class="selbar" hidden>
         <span id="selcount"></span>
         <div class="selbar-actions">
-          <button id="sel-clear" class="tool-btn">Clear</button>
-          <button id="sel-delete" class="tool-btn danger">Delete selected</button>
+          <button id="sel-clear" class="tool-btn" data-i18n="selbar.clear">Clear</button>
+          <button id="sel-delete" class="tool-btn danger" data-i18n="selbar.delete">Delete selected</button>
         </div>
       </div>
-      <div id="empty" class="empty" hidden>Nothing clipped yet. Right-click an image or text on any page to start collecting.</div>
+      <div id="empty" class="empty" hidden data-i18n="empty.none">Nothing clipped yet. Right-click an image or text on any page to start collecting.</div>
       <div id="grid" class="grid"></div>
     </main>
   </div>

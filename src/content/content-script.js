@@ -1,6 +1,23 @@
-import { MSG, CLIP_TYPES, THUMB_MAX_DIM } from '../core/constants.js';
+import { MSG, CLIP_TYPES, THUMB_MAX_DIM, LANG_KEY } from '../core/constants.js';
 import { computeThumbDimensions } from '../core/thumbnail.js';
 import { detectMediaType } from '../core/media-type.js';
+import { makeT, resolveLang } from '../core/i18n.js';
+
+let t = makeT(resolveLang('auto')); // 触发时按存储偏好重建
+
+// 读语言偏好并重建 t()。气泡/toast 显示前调用,确保用当前语言。
+function loadLang() {
+  return new Promise((res) => {
+    try {
+      chrome.storage.local.get(LANG_KEY, (o) => {
+        t = makeT(resolveLang(o?.[LANG_KEY] || 'auto'));
+        res();
+      });
+    } catch {
+      res();
+    }
+  });
+}
 
 // 防重复注入:按需注入(executeScript)可能把本文件重复执行一遍,
 // 若无此 guard 就会注册第二个 onMessage listener,导致一次剪藏存两次。
@@ -9,7 +26,7 @@ if (!window.__clipvaultInjected) {
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type !== MSG.CAPTURE_TRIGGER) return false;
-    handleTrigger(msg).catch((e) => toast('Clip failed: ' + e.message, true));
+    handleTrigger(msg).catch((e) => toast(t('bubble.clipFailedMsg', { msg: e.message }), true));
     sendResponse({ received: true }); // 干净关闭消息端口,避免 background 侧误报 lastError
     return false;
   });
@@ -18,10 +35,11 @@ if (!window.__clipvaultInjected) {
 async function handleTrigger(msg) {
   const clip = await buildClip(msg);
   if (!clip) return;
+  await loadLang();
   // 只读预备:算出建议项目/标签/项目列表,先不入库。
   const prep = await sendMessage({ type: MSG.PREPARE, clip });
   if (!prep?.ok) {
-    toast('Clip failed', true);
+    toast(t('bubble.clipFailed'), true);
     return;
   }
   showBubble(clip, prep);
@@ -127,27 +145,27 @@ function showBubble(clip, prep) {
     <div class="cv-head">
       <span class="cv-title">
         <svg class="cv-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
-        Save clip
+        ${escapeHtml(t('bubble.title'))}
       </span>
-      <button class="cv-x" title="Discard" aria-label="Discard">
+      <button class="cv-x" title="${escapeHtml(t('bubble.discard'))}" aria-label="${escapeHtml(t('bubble.discard'))}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
       </button>
     </div>
-    <label class="cv-row"><span>Project</span>
-      <select class="cv-project">${optionHtml}<option value="__new__">+ New project…</option></select>
+    <label class="cv-row"><span>${escapeHtml(t('bubble.project'))}</span>
+      <select class="cv-project">${optionHtml}<option value="__new__">${escapeHtml(t('bubble.newProjectOption'))}</option></select>
     </label>
-    <label class="cv-row cv-newproj" hidden><span>New project name</span>
-      <input class="cv-newproj-input" type="text" placeholder="e.g. Moodboard">
+    <label class="cv-row cv-newproj" hidden><span>${escapeHtml(t('bubble.newProject'))}</span>
+      <input class="cv-newproj-input" type="text" placeholder="${escapeHtml(t('bubble.newProject.placeholder'))}">
     </label>
-    <label class="cv-row"><span>Tags</span>
-      <input class="cv-tags" type="text" value="${escapeHtml((prep.tags || []).join(', '))}" placeholder="comma separated">
+    <label class="cv-row"><span>${escapeHtml(t('bubble.tags'))}</span>
+      <input class="cv-tags" type="text" value="${escapeHtml((prep.tags || []).join(', '))}" placeholder="${escapeHtml(t('bubble.tags.placeholder'))}">
     </label>
-    <label class="cv-row"><span>Note</span>
-      <input class="cv-note" type="text" placeholder="optional">
+    <label class="cv-row"><span>${escapeHtml(t('bubble.note'))}</span>
+      <input class="cv-note" type="text" placeholder="${escapeHtml(t('bubble.note.placeholder'))}">
     </label>
     <div class="cv-actions">
-      <button class="cv-discard">Discard</button>
-      <button class="cv-save">Save</button>
+      <button class="cv-discard">${escapeHtml(t('bubble.discard'))}</button>
+      <button class="cv-save">${escapeHtml(t('bubble.save'))}</button>
     </div>`;
   applyBubbleStyles(wrap);
   document.body.appendChild(wrap);
@@ -175,15 +193,15 @@ function showBubble(clip, prep) {
     if (project) toSave.project = project;
 
     saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving…';
+    saveBtn.textContent = t('bubble.saving');
     sendMessage({ type: MSG.CAPTURE, clip: toSave }).then((resp) => {
       if (!resp?.ok) {
-        toast('Save failed', true);
+        toast(t('bubble.saveFailed'), true);
         saveBtn.disabled = false;
-        saveBtn.textContent = 'Save';
+        saveBtn.textContent = t('bubble.save');
         return;
       }
-      toast(resp.status === 'duplicate' ? 'Already saved — skipped duplicate' : 'Saved');
+      toast(resp.status === 'duplicate' ? t('bubble.duplicate') : t('bubble.saved'));
       removeBubble();
     });
   };

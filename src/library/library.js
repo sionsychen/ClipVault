@@ -6,9 +6,12 @@ import {
 import { filterClips } from '../core/search.js';
 import { buildCardModel } from './render.js';
 import {
-  CLIP_TYPES, LAST_BACKUP_KEY, BACKUP_SNOOZE_KEY,
+  CLIP_TYPES, LAST_BACKUP_KEY, BACKUP_SNOOZE_KEY, LANG_KEY,
   STORAGE_WARN_RATIO, BACKUP_STALE_MS, BACKUP_SNOOZE_MS, DEFAULT_PROJECT,
 } from '../core/constants.js';
+import { makeT, resolveLang, SUPPORTED_LANGS } from '../core/i18n.js';
+
+let t = makeT('en'); // 载入后按偏好重建
 
 const state = {
   clips: [],
@@ -45,6 +48,7 @@ const els = {
   backupNow: document.getElementById('backup-now'),
   backupSnooze: document.getElementById('backup-snooze'),
   toasts: document.getElementById('toasts'),
+  settings: document.getElementById('settings'),
 };
 
 const TYPE_LABEL = {
@@ -65,6 +69,7 @@ const ICON_PATHS = {
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   chevronLeft: '<path d="m15 18-6-6 6-6"/>',
   chevronRight: '<path d="m9 18 6-6-6-6"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
 };
 
 function icon(name) {
@@ -81,23 +86,63 @@ function icon(name) {
   return svg;
 }
 
+// ---- i18n ----
+// 载入语言偏好(chrome.storage.local),重建 t(),刷新所有静态 data-i18n 文本。
+async function initI18n() {
+  const pref = await getLangPref();
+  const lang = resolveLang(pref);
+  t = makeT(lang);
+  document.documentElement.lang = lang;
+  applyStaticI18n();
+  els.settings.appendChild(icon('settings'));
+}
+
+// 扫描带 data-i18n* 的静态节点并回填文本/属性。切换语言后重跑即可。
+function applyStaticI18n() {
+  document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); });
+  document.querySelectorAll('[data-i18n-ph]').forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
+  document.querySelectorAll('[data-i18n-aria]').forEach((el) => { el.setAttribute('aria-label', t(el.dataset.i18nAria)); });
+}
+
+function getLangPref() {
+  return new Promise((res) => {
+    try {
+      chrome.storage.local.get(LANG_KEY, (o) => res(o?.[LANG_KEY] || 'auto'));
+    } catch {
+      res(localStorage.getItem(LANG_KEY) || 'auto'); // 测试/无扩展环境回退
+    }
+  });
+}
+
+function setLangPref(pref) {
+  return new Promise((res) => {
+    try {
+      chrome.storage.local.set({ [LANG_KEY]: pref }, () => res());
+    } catch {
+      localStorage.setItem(LANG_KEY, pref);
+      res();
+    }
+  });
+}
+
 // ---- toast(含可选 Undo 动作)----
 // 替代原生 alert/confirm:非阻塞,不打断,契合中性风格。
 function showToast(message, { actionLabel, onAction, duration = 5000, danger = false } = {}) {
-  const t = document.createElement('div');
-  t.className = 'toast' + (danger ? ' danger' : '');
+  const el = document.createElement('div');
+  el.className = 'toast' + (danger ? ' danger' : '');
   const msg = document.createElement('span');
   msg.className = 'toast-msg';
   msg.textContent = message;
-  t.appendChild(msg);
+  el.appendChild(msg);
 
   let timer;
   const dismiss = () => {
     clearTimeout(timer);
-    t.classList.add('out');
-    t.addEventListener('animationend', () => t.remove(), { once: true });
+    el.classList.add('out');
+    el.addEventListener('animationend', () => el.remove(), { once: true });
     // 兜底:动画被 reduced-motion 关掉时直接移除
-    setTimeout(() => t.remove(), 250);
+    setTimeout(() => el.remove(), 250);
   };
 
   if (actionLabel && onAction) {
@@ -105,10 +150,10 @@ function showToast(message, { actionLabel, onAction, duration = 5000, danger = f
     btn.className = 'toast-action';
     btn.textContent = actionLabel;
     btn.onclick = () => { dismiss(); onAction(); };
-    t.appendChild(btn);
+    el.appendChild(btn);
   }
 
-  els.toasts.appendChild(t);
+  els.toasts.appendChild(el);
   timer = setTimeout(dismiss, duration);
   return dismiss;
 }
@@ -134,6 +179,7 @@ async function init() {
   els.modalBackdrop.addEventListener('click', closeModal);
   els.backupNow.addEventListener('click', () => { doExportJson(); });
   els.backupSnooze.addEventListener('click', snoozeBackupReminder);
+  els.settings.addEventListener('click', openSettingsModal);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') return closeModal();
     // 灯箱开着时方向键翻页(编辑模态开着时不翻)。
@@ -145,6 +191,7 @@ async function init() {
       if (next) openLightbox(next.clip, next.m);
     }
   });
+  await initI18n();
   await reload();
   renderUsage();
   refreshBackupReminder();
@@ -175,7 +222,7 @@ function renderSidebar(projects, tags) {
   state.allProjects = projList;
 
   els.projects.innerHTML = '';
-  els.projects.appendChild(makePill('All', state.project === null, () => {
+  els.projects.appendChild(makePill(t('project.all'), state.project === null, () => {
     state.project = null;
     renderSidebar(projects, tags);
     renderGrid();
@@ -191,8 +238,8 @@ function renderSidebar(projects, tags) {
       const del = document.createElement('button');
       del.className = 'pill-del';
       del.appendChild(icon('x'));
-      del.title = `Delete project "${p}" (clips move to ${DEFAULT_PROJECT})`;
-      del.setAttribute('aria-label', `Delete project ${p}, moving its clips to ${DEFAULT_PROJECT}`);
+      del.title = t('project.delete.title', { name: p, def: DEFAULT_PROJECT });
+      del.setAttribute('aria-label', t('project.delete.aria', { name: p, def: DEFAULT_PROJECT }));
       del.onclick = async (e) => {
         e.stopPropagation();
         // 记下受影响的 clip,供撤销时归还原项目。
@@ -200,8 +247,8 @@ function renderSidebar(projects, tags) {
         await removeProject(p);
         if (state.project === p) state.project = null;
         await reload();
-        showToast(`Deleted project "${p}" · ${affected.length} clip${affected.length === 1 ? '' : 's'} moved to ${DEFAULT_PROJECT}`, {
-          actionLabel: 'Undo',
+        showToast(t('project.deleted', { name: p, n: affected.length, def: DEFAULT_PROJECT }), {
+          actionLabel: t('toast.undo'),
           onAction: async () => {
             for (const id of affected) await updateClip(id, { project: p });
             await reload();
@@ -214,33 +261,33 @@ function renderSidebar(projects, tags) {
   }
 
   els.tags.innerHTML = '';
-  for (const t of tags) {
-    const active = state.activeTags.has(t.name);
-    const pill = makePill(t.name, active, () => {
-      if (active) state.activeTags.delete(t.name);
-      else state.activeTags.add(t.name);
+  for (const tg of tags) {
+    const active = state.activeTags.has(tg.name);
+    const pill = makePill(tg.name, active, () => {
+      if (active) state.activeTags.delete(tg.name);
+      else state.activeTags.add(tg.name);
       renderSidebar(projects, tags);
       renderGrid();
-    }, t.count);
+    }, tg.count);
     const del = document.createElement('button');
     del.className = 'pill-del';
     del.appendChild(icon('x'));
-    del.title = `Delete tag "${t.name}" from all clips`;
-    del.setAttribute('aria-label', `Delete tag ${t.name} from all clips`);
+    del.title = t('tag.delete.title', { name: tg.name });
+    del.setAttribute('aria-label', t('tag.delete.aria', { name: tg.name }));
     del.onclick = async (e) => {
       e.stopPropagation();
       // 记下带此 tag 的 clip,供撤销时逐个加回。
-      const affected = state.clips.filter((c) => c.tags?.includes(t.name)).map((c) => c.id);
-      await removeTag(t.name);
-      state.activeTags.delete(t.name);
+      const affected = state.clips.filter((c) => c.tags?.includes(tg.name)).map((c) => c.id);
+      await removeTag(tg.name);
+      state.activeTags.delete(tg.name);
       await reload();
-      showToast(`Removed tag "${t.name}" from ${affected.length} clip${affected.length === 1 ? '' : 's'}`, {
-        actionLabel: 'Undo',
+      showToast(t('tag.removed', { name: tg.name, n: affected.length }), {
+        actionLabel: t('toast.undo'),
         onAction: async () => {
           for (const id of affected) {
             const clip = state.clips.find((x) => x.id === id);
-            const tags = [...new Set([...(clip?.tags || []), t.name])];
-            await updateClip(id, { tags });
+            const tags2 = [...new Set([...(clip?.tags || []), tg.name])];
+            await updateClip(id, { tags: tags2 });
           }
           await reload();
         },
@@ -274,8 +321,8 @@ function renderGrid() {
   state.filtered = filtered; // 灯箱 ←/→ 在这个可见集合里翻
   els.empty.hidden = filtered.length > 0;
   els.empty.textContent = state.clips.length === 0
-    ? 'Nothing clipped yet. Right-click an image or text on any page to start collecting.'
-    : 'No clips match your filters.';
+    ? t('empty.none')
+    : t('empty.nomatch');
   els.grid.innerHTML = '';
   filtered.forEach((clip, i) => {
     const card = renderCard(clip);
@@ -295,7 +342,7 @@ function renderCard(clip) {
   check.type = 'checkbox';
   check.className = 'select-box';
   check.checked = state.selected.has(clip.id);
-  check.title = 'Select';
+  check.title = t('card.select');
   check.onclick = (e) => e.stopPropagation();
   check.onchange = () => {
     if (check.checked) state.selected.add(clip.id);
@@ -328,8 +375,8 @@ function renderCard(clip) {
       const lo = document.createElement('span');
       lo.className = 'link-only';
       lo.appendChild(icon('open'));
-      lo.append('Link only');
-      lo.title = 'Full-resolution image was not saved (cross-origin). Shows thumbnail; opens source for the original.';
+      lo.append(t('card.linkOnly'));
+      lo.title = t('card.linkOnly.title');
       frame.appendChild(lo);
     }
     frame.onclick = () => openLightbox(clip, m);
@@ -345,10 +392,10 @@ function renderCard(clip) {
   const body = document.createElement('div');
   body.className = 'body';
   if (m.title) {
-    const t = document.createElement('div');
-    t.className = 'title';
-    t.textContent = m.title;
-    body.appendChild(t);
+    const ttl = document.createElement('div');
+    ttl.className = 'title';
+    ttl.textContent = m.title;
+    body.appendChild(ttl);
   }
   if (m.tags.length) {
     const tw = document.createElement('div');
@@ -373,21 +420,21 @@ function buildActions(clip) {
 
   const open = document.createElement('button');
   open.appendChild(icon('open'));
-  open.title = 'Open source';
-  open.setAttribute('aria-label', 'Open source page');
+  open.title = t('card.open');
+  open.setAttribute('aria-label', t('card.open.aria'));
   open.onclick = (e) => { e.stopPropagation(); if (clip.sourceUrl) window.open(clip.sourceUrl, '_blank'); };
 
   const edit = document.createElement('button');
   edit.appendChild(icon('edit'));
-  edit.title = 'Edit';
-  edit.setAttribute('aria-label', 'Edit clip');
+  edit.title = t('card.edit');
+  edit.setAttribute('aria-label', t('card.edit.aria'));
   edit.onclick = (e) => { e.stopPropagation(); openEditModal(clip); };
 
   const del = document.createElement('button');
   del.className = 'danger';
   del.appendChild(icon('trash'));
-  del.title = 'Delete';
-  del.setAttribute('aria-label', 'Delete clip');
+  del.title = t('card.delete');
+  del.setAttribute('aria-label', t('card.delete.aria'));
   del.onclick = (e) => {
     e.stopPropagation();
     deleteWithUndo([clip]);
@@ -402,7 +449,7 @@ function buildActions(clip) {
 function renderSelbar() {
   const n = state.selected.size;
   els.selbar.hidden = n === 0;
-  els.selcount.textContent = `${n} selected`;
+  els.selcount.textContent = t('selbar.count', { n });
 }
 
 function clearSelection() {
@@ -435,8 +482,8 @@ async function deleteWithUndo(clips) {
   renderUsage();
 
   const n = clips.length;
-  showToast(`Deleted ${n} clip${n === 1 ? '' : 's'}`, {
-    actionLabel: 'Undo',
+  showToast(t('toast.deleted', { n }), {
+    actionLabel: t('toast.undo'),
     onAction: async () => {
       for (const { clip, blob } of snapshots) {
         const { id } = await addClip(clip); // clipKey 去重:已存在则命中原记录
@@ -472,16 +519,16 @@ async function openLightbox(clip, m) {
   const cap = document.createElement('div');
   cap.className = 'modal-caption';
   if (m.title) {
-    const t = document.createElement('div');
-    t.textContent = m.title;
-    cap.appendChild(t);
+    const ttl = document.createElement('div');
+    ttl.textContent = m.title;
+    cap.appendChild(ttl);
   }
   if (m.sourceUrl) {
     const a = document.createElement('a');
     a.href = m.sourceUrl;
     a.target = '_blank';
     a.rel = 'noopener';
-    a.textContent = m.isVideo ? 'Watch source ↗' : 'Open source ↗';
+    a.textContent = m.isVideo ? t('lightbox.watch') : t('lightbox.open');
     cap.appendChild(a);
   }
   els.modalBody.appendChild(cap);
@@ -530,7 +577,7 @@ function adjacentImageClip(currentId, dir) {
 function makeNavButton(dir, onClick) {
   const btn = document.createElement('button');
   btn.className = `lightbox-nav ${dir}`;
-  btn.setAttribute('aria-label', dir === 'prev' ? 'Previous' : 'Next');
+  btn.setAttribute('aria-label', dir === 'prev' ? t('nav.prev') : t('nav.next'));
   btn.appendChild(icon(dir === 'prev' ? 'chevronLeft' : 'chevronRight'));
   btn.onclick = (e) => { e.stopPropagation(); onClick(); };
   return btn;
@@ -544,31 +591,31 @@ function openEditModal(clip) {
   panel.className = 'edit-panel';
 
   const h = document.createElement('h3');
-  h.textContent = 'Edit clip';
+  h.textContent = t('edit.title');
   panel.appendChild(h);
 
   const projSel = buildProjectSelect(clip.project || '');
-  const projLabel = labeled('Project', projSel.wrap);
+  const projLabel = labeled(t('edit.project'), projSel.wrap);
   panel.appendChild(projLabel);
 
   const tagEditor = buildTagEditor(clip.tags || []);
-  panel.appendChild(labeled('Tags', tagEditor.wrap));
+  panel.appendChild(labeled(t('edit.tags'), tagEditor.wrap));
 
   const noteInput = document.createElement('input');
   noteInput.type = 'text';
   noteInput.value = clip.note || '';
-  noteInput.placeholder = 'optional';
-  panel.appendChild(labeled('Note', noteInput));
+  noteInput.placeholder = t('edit.note.placeholder');
+  panel.appendChild(labeled(t('edit.note'), noteInput));
 
   const actions = document.createElement('div');
   actions.className = 'edit-actions';
   const cancel = document.createElement('button');
   cancel.className = 'tool-btn';
-  cancel.textContent = 'Cancel';
+  cancel.textContent = t('edit.cancel');
   cancel.onclick = closeModal;
   const save = document.createElement('button');
   save.className = 'tool-btn primary';
-  save.textContent = 'Save';
+  save.textContent = t('edit.save');
   save.onclick = async () => {
     const tags = tagEditor.value();
     const note = noteInput.value.trim();
@@ -594,7 +641,7 @@ function buildTagEditor(initial) {
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'tag-input';
-  input.placeholder = 'add tag, Enter to confirm';
+  input.placeholder = t('tageditor.placeholder');
 
   function renderChips() {
     chips.innerHTML = '';
@@ -606,8 +653,8 @@ function buildTagEditor(initial) {
       x.type = 'button';
       x.className = 'chip-x';
       x.appendChild(icon('x'));
-      x.title = 'Remove tag';
-      x.setAttribute('aria-label', `Remove tag ${tag}`);
+      x.title = t('tageditor.remove');
+      x.setAttribute('aria-label', t('tageditor.remove.aria', { tag }));
       x.onclick = () => {
         const i = tags.indexOf(tag);
         if (i >= 0) tags.splice(i, 1);
@@ -619,8 +666,8 @@ function buildTagEditor(initial) {
   }
 
   function commit() {
-    input.value.split(',').map((s) => s.trim()).filter(Boolean).forEach((t) => {
-      if (!tags.includes(t)) tags.push(t);
+    input.value.split(',').map((s) => s.trim()).filter(Boolean).forEach((tag) => {
+      if (!tags.includes(tag)) tags.push(tag);
     });
     input.value = '';
     renderChips();
@@ -656,12 +703,12 @@ function buildProjectSelect(current) {
   }
   const newOpt = document.createElement('option');
   newOpt.value = '__new__';
-  newOpt.textContent = '+ New project…';
+  newOpt.textContent = t('edit.newProject');
   sel.appendChild(newOpt);
 
   const newInput = document.createElement('input');
   newInput.type = 'text';
-  newInput.placeholder = 'New project name';
+  newInput.placeholder = t('edit.newProject.placeholder');
   newInput.hidden = true;
   newInput.style.marginTop = '6px';
 
@@ -684,6 +731,55 @@ function labeled(labelText, control) {
   span.textContent = labelText;
   label.append(span, control);
   return label;
+}
+
+// ---- 设置(语言切换)----
+function openSettingsModal() {
+  els.modalBody.innerHTML = '';
+  const panel = document.createElement('div');
+  panel.className = 'edit-panel';
+
+  const h = document.createElement('h3');
+  h.textContent = t('settings.title');
+  panel.appendChild(h);
+
+  const sel = document.createElement('select');
+  const opts = [
+    ['auto', t('settings.lang.auto')],
+    ['en', t('settings.lang.en')],
+    ['zh', t('settings.lang.zh')],
+  ];
+  getLangPref().then((pref) => {
+    for (const [val, label] of opts) {
+      const o = document.createElement('option');
+      o.value = val;
+      o.textContent = label;
+      if (val === pref) o.selected = true;
+      sel.appendChild(o);
+    }
+  });
+  sel.onchange = async () => {
+    await setLangPref(sel.value);
+    t = makeT(resolveLang(sel.value));
+    document.documentElement.lang = resolveLang(sel.value);
+    applyStaticI18n();
+    await reload();       // 网格/侧栏用新语言重渲染
+    renderUsage();
+    openSettingsModal();  // 重开,让弹窗自身文案也切过来
+  };
+  panel.appendChild(labeled(t('settings.language'), sel));
+
+  const actions = document.createElement('div');
+  actions.className = 'edit-actions';
+  const close = document.createElement('button');
+  close.className = 'tool-btn primary';
+  close.textContent = t('settings.close');
+  close.onclick = closeModal;
+  actions.appendChild(close);
+  panel.appendChild(actions);
+
+  els.modalBody.appendChild(panel);
+  els.modal.hidden = false;
 }
 
 function closeModal() {
@@ -729,9 +825,9 @@ async function doImport(e) {
     const r = await importData(payload);
     await reload();
     renderUsage();
-    showToast(`Imported ${r.added} new clip${r.added === 1 ? '' : 's'}, skipped ${r.skipped} duplicate${r.skipped === 1 ? '' : 's'}.`);
+    showToast(t('toast.imported', { added: r.added, skipped: r.skipped }));
   } catch (err) {
-    showToast('Import failed: ' + err.message, { danger: true, duration: 7000 });
+    showToast(t('toast.importFailed', { msg: err.message }), { danger: true, duration: 7000 });
   } finally {
     e.target.value = ''; // 允许再次选同一文件
   }
@@ -739,14 +835,14 @@ async function doImport(e) {
 
 // 纯格式化,不触库。
 function clipsToMarkdown(clips) {
-  const lines = ['# ClipVault export', ''];
+  const lines = [t('md.export.title'), ''];
   for (const c of clips) {
-    const title = c.pageTitle || c.content || '(untitled)';
+    const title = c.pageTitle || c.content || t('md.untitled');
     lines.push(`- **${title}**`);
-    if (c.sourceUrl) lines.push(`  - Source: ${c.sourceUrl}`);
-    if (c.project) lines.push(`  - Project: ${c.project}`);
-    if (c.tags?.length) lines.push(`  - Tags: ${c.tags.join(', ')}`);
-    if (c.note) lines.push(`  - Note: ${c.note}`);
+    if (c.sourceUrl) lines.push(`  - ${t('md.source')}: ${c.sourceUrl}`);
+    if (c.project) lines.push(`  - ${t('md.project')}: ${c.project}`);
+    if (c.tags?.length) lines.push(`  - ${t('md.tags')}: ${c.tags.join(', ')}`);
+    if (c.note) lines.push(`  - ${t('md.note')}: ${c.note}`);
   }
   return lines.join('\n');
 }
@@ -768,7 +864,7 @@ function dateStamp() {
 async function renderUsage() {
   const { usage, quota } = await estimateUsage();
   if (!usage) {
-    els.usage.textContent = `${state.clips.length} clips`;
+    els.usage.textContent = t('usage.clips', { n: state.clips.length });
     els.usage.classList.remove('warn');
     return;
   }
@@ -777,10 +873,10 @@ async function renderUsage() {
   els.usage.classList.toggle('warn', !!near);
   if (near) {
     const pct = Math.round((usage / quota) * 100);
-    els.usage.textContent = `⚠ Storage ${pct}% full · export a backup`;
-    els.usage.title = `${mb} MB of ${(quota / 1024 / 1024).toFixed(0)} MB used. Approaching the browser limit — export a backup to avoid losing clips.`;
+    els.usage.textContent = t('usage.warn', { pct });
+    els.usage.title = t('usage.warn.title', { mb, quota: (quota / 1024 / 1024).toFixed(0) });
   } else {
-    els.usage.textContent = `${mb} MB used · ${state.clips.length} clips`;
+    els.usage.textContent = t('usage.used', { mb, n: state.clips.length });
     els.usage.title = '';
   }
 }
@@ -802,8 +898,8 @@ function refreshBackupReminder() {
   if (!show) return;
 
   els.backupMsg.textContent = last
-    ? `Your last backup was ${daysAgo(now - last)}. Export a backup to keep your ${n} clip${n === 1 ? '' : 's'} safe.`
-    : `You have ${n} clip${n === 1 ? '' : 's'} and no backup yet. Clips live only in this browser — export a backup so you don't lose them.`;
+    ? t('backup.stale', { ago: daysAgo(now - last), n })
+    : t('backup.never', { n });
 }
 
 function snoozeBackupReminder() {
@@ -813,15 +909,15 @@ function snoozeBackupReminder() {
 
 function daysAgo(ms) {
   const days = Math.floor(ms / (24 * 60 * 60 * 1000));
-  if (days <= 0) return 'today';
-  if (days === 1) return 'yesterday';
-  return `${days} days ago`;
+  if (days <= 0) return t('time.today');
+  if (days === 1) return t('time.yesterday');
+  return t('time.daysAgo', { n: days });
 }
 
 function debounce(fn, ms) {
-  let t;
+  let timer;
   return (...a) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...a), ms);
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...a), ms);
   };
 }

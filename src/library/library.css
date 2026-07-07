@@ -130,6 +130,26 @@ body {
 .tool-btn.danger { color: var(--danger); }
 .tool-btn.danger:hover { border-color: var(--danger); background: var(--danger-soft); }
 
+/* icon-only toolbar button (settings gear) */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background .14s, border-color .14s, color .14s;
+}
+.icon-btn:hover { background: var(--surface-2); border-color: var(--faint); color: var(--text); }
+.icon-btn:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+.icon-btn .icon { width: 17px; height: 17px; }
+
 .usage {
   margin-left: auto;
   font-size: 12px;
