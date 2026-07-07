@@ -77,4 +77,4 @@ Everything is stored locally in your browser (IndexedDB). Nothing is ever upload
 
 ## License
 
-Not yet specified.
+[MIT](LICENSE) © sionsychen

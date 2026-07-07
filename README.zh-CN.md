@@ -77,4 +77,4 @@ ClipVault 刻意只申请最小权限。它**不使用**广域 `<all_urls>` host
 
 ## 许可
 
-暂未指定。
+[MIT](LICENSE) © sionsychen
